@@ -179,6 +179,15 @@ async fn run(
             Update::Offline("Offline mode · showing captured history".into()),
         )
         .await;
+        let mut limit = 1000;
+        while let Some(command) = commands.recv().await {
+            if matches!(command, Command::Older) {
+                limit = (limit + 250).min(10_000);
+            }
+            if let Ok(records) = store.load_limit(&scope, limit).await {
+                emit(&sender, session, Update::Records(records)).await;
+            }
+        }
         return;
     }
     let rpc = Arc::new(client(&profile));
@@ -197,6 +206,7 @@ async fn run(
     let mut chain = String::new();
     let mut cursors = HashMap::new();
     let mut last_error = String::new();
+    let mut display_limit = 1000;
     loop {
         let command = tokio::select! {
             _ = interval.tick() => Command::Refresh,
@@ -216,6 +226,18 @@ async fn run(
             },
         };
         if let Command::Detail(signature) = command {
+            if chain.is_empty() {
+                emit(
+                    &sender,
+                    session,
+                    Update::Log(LogEntry::new(
+                        "WARN",
+                        "Waiting for RPC network identity before fetching transaction details",
+                    )),
+                )
+                .await;
+                continue;
+            }
             match fetch_detail(&rpc, &signature).await {
                 Ok(Some(record)) => {
                     records.insert(signature, record.clone());
@@ -254,6 +276,9 @@ async fn run(
             }
             continue;
         }
+        if matches!(command, Command::Older) {
+            display_limit = (display_limit + 250).min(10_000);
+        }
         let result = tokio::time::timeout(
             Duration::from_secs(45),
             refresh(
@@ -266,6 +291,7 @@ async fn run(
                 &scope,
                 &mut chain,
                 matches!(command, Command::Older),
+                display_limit,
             ),
         )
         .await;
@@ -314,6 +340,7 @@ async fn refresh(
     scope: &str,
     chain: &mut String,
     older: bool,
+    display_limit: usize,
 ) -> Result<(NetworkState, Option<u64>, Vec<String>)> {
     let started = Instant::now();
     let (genesis, epoch, health, version) = tokio::join!(
@@ -329,10 +356,23 @@ async fn refresh(
         store.save(scope, &genesis, vec![]).await?;
         records.clear();
         cursors.clear();
-        for record in store.load(scope).await? {
+        for record in store.load_limit(scope, display_limit).await? {
             records.insert(record.signature.clone(), record);
         }
+        for (address, signature) in store.cursors(scope).await? {
+            if let Ok(signature) = Signature::from_str(&signature) {
+                cursors.insert(address, signature);
+            }
+        }
         *chain = genesis.clone();
+    }
+    let mut load_remote_history = true;
+    if older {
+        let cached = store.load_limit(scope, display_limit).await?;
+        load_remote_history = cached.len() < display_limit;
+        for record in cached {
+            records.insert(record.signature.clone(), record);
+        }
     }
     let mut network = NetworkState {
         cluster: cluster_name(&genesis, profile),
@@ -387,8 +427,12 @@ async fn refresh(
         watched.truncate(33);
     }
     let mut seen = HashSet::new();
+    let mut dirty = HashSet::new();
     watched.retain(|address| seen.insert(*address));
     for account in watched {
+        if !load_remote_history {
+            break;
+        }
         let key = account.to_string();
         let advance_cursor = older || !cursors.contains_key(&key);
         let mut before = if older {
@@ -420,6 +464,7 @@ async fn refresh(
                 }
             }
             for entry in entries {
+                dirty.insert(entry.signature.clone());
                 if records.contains_key(&entry.signature) {
                     reached_known = true;
                 }
@@ -461,14 +506,37 @@ async fn refresh(
         .buffer_unordered(3);
     while let Some(result) = results.next().await {
         if let Ok(Some(record)) = result {
+            dirty.insert(record.signature.clone());
             records.insert(record.signature.clone(), record);
         }
     }
     let saved = sorted(records);
-    store.save(scope, chain, saved.clone()).await?;
-    if records.len() > 1000 {
+    store
+        .save(
+            scope,
+            chain,
+            dirty
+                .into_iter()
+                .filter_map(|signature| records.get(&signature).cloned())
+                .collect(),
+        )
+        .await?;
+    store
+        .save_cursors(
+            scope,
+            chain,
+            cursors
+                .iter()
+                .map(|(address, signature)| (address.clone(), signature.to_string()))
+                .collect(),
+        )
+        .await?;
+    if display_limit == 10_000 {
+        warnings.push("Showing up to 10,000 captured records in this session. Additional records remain in the local database.".into());
+    }
+    if records.len() > display_limit {
         records.clear();
-        for record in saved.into_iter().take(1000) {
+        for record in saved.into_iter().take(display_limit) {
             records.insert(record.signature.clone(), record);
         }
     }

@@ -114,6 +114,16 @@ impl Ui {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         self.target(area, Action::Focus(pane));
+        if area.width >= 6 && area.height >= 2 {
+            self.button(
+                frame,
+                Rect::new(area.right() - 5, area.bottom() - 1, 3, 1),
+                if app.zoomed { "−" } else { "+" },
+                Action::Expand(pane),
+                theme,
+                false,
+            );
+        }
         inner
     }
 
@@ -758,7 +768,8 @@ impl Ui {
         frame.render_widget(
             Paragraph::new(lines)
                 .style(Style::default().fg(theme.text))
-                .wrap(Wrap { trim: false }),
+                .wrap(Wrap { trim: false })
+                .scroll((app.network_scroll, 0)),
             content,
         );
         if inner.height >= 5 {
@@ -937,9 +948,9 @@ impl Ui {
         ]);
         frame.render_widget(
             Paragraph::new(footer).style(Style::default().fg(theme.muted)),
-            Rect::new(area.x, area.y + 2, area.width, 1),
+            Rect::new(area.x, area.y + 2, area.width.saturating_sub(24), 1),
         );
-        if area.width > 90 {
+        if area.width >= 48 {
             self.button(
                 frame,
                 Rect::new(area.right() - 23, area.y + 2, 10, 1),
@@ -949,7 +960,7 @@ impl Ui {
                 false,
             );
         }
-        if area.width > 70 {
+        if area.width >= 48 {
             self.button(
                 frame,
                 Rect::new(area.right() - 12, area.y + 2, 11, 1),

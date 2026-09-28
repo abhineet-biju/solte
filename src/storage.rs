@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Result, anyhow};
 use rusqlite::{Connection, params};
@@ -14,7 +14,9 @@ type Reply<T> = oneshot::Sender<Result<T>>;
 
 enum Request {
     Config(std::path::PathBuf, crate::config::Config, Reply<()>),
-    Load(String, Reply<Vec<TransactionRecord>>),
+    Load(String, usize, Reply<Vec<TransactionRecord>>),
+    Cursors(String, Reply<HashMap<String, String>>),
+    SaveCursors(String, String, HashMap<String, String>, Reply<()>),
     Save(String, String, Vec<TransactionRecord>, Reply<()>),
     Log(String, LogEntry, Reply<()>),
     Logs(String, Reply<Vec<LogEntry>>),
@@ -41,6 +43,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS networks(scope TEXT PRIMARY KEY, chain TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS transactions(scope TEXT NOT NULL, chain TEXT NOT NULL, signature TEXT NOT NULL, slot INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope, chain, signature));
             CREATE INDEX IF NOT EXISTS transaction_order ON transactions(scope, chain, slot DESC);
+            CREATE TABLE IF NOT EXISTS cursors(scope TEXT NOT NULL, chain TEXT NOT NULL, address TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY(scope, chain, address));
             CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL);")?;
         let (sender, mut receiver) = mpsc::channel(128);
         std::thread::Builder::new()
@@ -52,8 +55,14 @@ impl Store {
                         Request::Config(root, config, reply) => {
                             let _ = reply.send(config.save(&root));
                         }
-                        Request::Load(scope, reply) => {
-                            let _ = reply.send(load(&conn, &scope));
+                        Request::Load(scope, limit, reply) => {
+                            let _ = reply.send(load(&conn, &scope, limit));
+                        }
+                        Request::Cursors(scope, reply) => {
+                            let _ = reply.send(load_cursors(&conn, &scope));
+                        }
+                        Request::SaveCursors(scope, chain, cursors, reply) => {
+                            let _ = reply.send(save_cursors(&mut conn, &scope, &chain, &cursors));
                         }
                         Request::Save(scope, chain, records, reply) => {
                             let _ = reply.send(save(&mut conn, &scope, &chain, &records));
@@ -79,8 +88,40 @@ impl Store {
     }
 
     pub async fn load(&self, scope: &str) -> Result<Vec<TransactionRecord>> {
+        self.load_limit(scope, 1000).await
+    }
+
+    pub async fn load_limit(&self, scope: &str, limit: usize) -> Result<Vec<TransactionRecord>> {
         let (send, receive) = oneshot::channel();
-        self.sender.send(Request::Load(scope.into(), send)).await?;
+        self.sender
+            .send(Request::Load(scope.into(), limit.min(10_000), send))
+            .await?;
+        receive.await?
+    }
+
+    pub async fn cursors(&self, scope: &str) -> Result<HashMap<String, String>> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::Cursors(scope.into(), send))
+            .await?;
+        receive.await?
+    }
+
+    pub async fn save_cursors(
+        &self,
+        scope: &str,
+        chain: &str,
+        cursors: HashMap<String, String>,
+    ) -> Result<()> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::SaveCursors(
+                scope.into(),
+                chain.into(),
+                cursors,
+                send,
+            ))
+            .await?;
         receive.await?
     }
 
@@ -116,9 +157,9 @@ pub fn scope(endpoint: &str, address: &str) -> String {
     format!("{:x}:{address}", Sha256::digest(endpoint.as_bytes()))
 }
 
-fn load(conn: &Connection, scope: &str) -> Result<Vec<TransactionRecord>> {
-    let mut stmt = conn.prepare("SELECT payload FROM transactions WHERE scope=?1 AND chain=(SELECT chain FROM networks WHERE scope=?1) ORDER BY slot DESC LIMIT 1000")?;
-    let rows = stmt.query_map([scope], |r| r.get::<_, String>(0))?;
+fn load(conn: &Connection, scope: &str, limit: usize) -> Result<Vec<TransactionRecord>> {
+    let mut stmt = conn.prepare("SELECT payload FROM transactions WHERE scope=?1 AND chain=(SELECT chain FROM networks WHERE scope=?1) ORDER BY slot DESC LIMIT ?2")?;
+    let rows = stmt.query_map(params![scope, limit as i64], |r| r.get::<_, String>(0))?;
     rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
 }
 
@@ -133,6 +174,27 @@ fn save(
     for record in records {
         let slot = i64::try_from(record.slot).map_err(|_| anyhow!("Invalid slot"))?;
         tx.execute("INSERT INTO transactions(scope,chain,signature,slot,payload) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(scope,chain,signature) DO UPDATE SET slot=excluded.slot,payload=excluded.payload", params![scope, chain, record.signature, slot, serde_json::to_string(record)?])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn load_cursors(conn: &Connection, scope: &str) -> Result<HashMap<String, String>> {
+    let mut stmt = conn.prepare("SELECT address,signature FROM cursors WHERE scope=?1 AND chain=(SELECT chain FROM networks WHERE scope=?1)")?;
+    Ok(stmt
+        .query_map([scope], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?)
+}
+
+fn save_cursors(
+    conn: &mut Connection,
+    scope: &str,
+    chain: &str,
+    cursors: &HashMap<String, String>,
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    for (address, signature) in cursors {
+        tx.execute("INSERT INTO cursors(scope,chain,address,signature) VALUES(?1,?2,?3,?4) ON CONFLICT(scope,chain,address) DO UPDATE SET signature=excluded.signature", params![scope, chain, address, signature])?;
     }
     tx.commit()?;
     Ok(())
@@ -184,5 +246,38 @@ mod tests {
         assert!(store.load("wallet").await.unwrap().is_empty());
         store.save("wallet", "chain-a", vec![]).await.unwrap();
         assert_eq!(store.load("wallet").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn archived_pages_and_per_address_cursors_survive_reopening() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let records = (0..1100)
+            .map(|i| TransactionRecord {
+                signature: format!("signature-{i}"),
+                slot: i,
+                timestamp: None,
+                error: None,
+                details: None,
+            })
+            .collect();
+        store.save("scope", "chain-a", records).await.unwrap();
+        store
+            .save_cursors(
+                "scope",
+                "chain-a",
+                HashMap::from([
+                    ("wallet".into(), "older-wallet-signature".into()),
+                    ("token".into(), "older-token-signature".into()),
+                ]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.load("scope").await.unwrap().len(), 1000);
+        assert_eq!(store.load_limit("scope", 1250).await.unwrap().len(), 1100);
+        let reopened = Store::open(temp.path()).unwrap();
+        assert_eq!(reopened.cursors("scope").await.unwrap().len(), 2);
+        reopened.save("scope", "chain-b", vec![]).await.unwrap();
+        assert!(reopened.cursors("scope").await.unwrap().is_empty());
     }
 }

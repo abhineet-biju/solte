@@ -81,6 +81,7 @@ pub enum Action {
     Failures,
     Help,
     Zoom,
+    Expand(Pane),
     Field(usize),
     Scroll(i32),
     NextWallet,
@@ -257,6 +258,7 @@ pub struct App {
     pub log_scroll: usize,
     pub follow: bool,
     pub network: Option<NetworkState>,
+    pub network_scroll: u16,
     pub balance: Option<u64>,
     pub connected: bool,
     pub subscribed: bool,
@@ -293,6 +295,7 @@ impl App {
             log_scroll: 0,
             follow: true,
             network: None,
+            network_scroll: 0,
             balance: None,
             connected: false,
             subscribed: false,
@@ -458,7 +461,10 @@ impl App {
                     self.follow = false;
                     self.log_scroll = move_index(self.log_scroll, -delta, self.logs.len());
                 }
-                Pane::Network => {}
+                Pane::Network => {
+                    self.network_scroll =
+                        (i32::from(self.network_scroll) + delta).clamp(0, 18) as u16
+                }
             },
             Action::Scroll(delta) => match &mut self.modal {
                 Some(Modal::Form(form)) => {
@@ -497,6 +503,10 @@ impl App {
             }
             Action::Help => self.modal = Some(Modal::Help { scroll: 0 }),
             Action::Zoom => self.zoomed = !self.zoomed,
+            Action::Expand(pane) => {
+                self.zoomed = !(self.zoomed && self.pane == pane);
+                self.pane = pane;
+            }
             Action::Close => {
                 self.modal = None;
                 self.zoomed = false;
