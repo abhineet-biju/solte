@@ -18,14 +18,10 @@ Solte is a developer-first, TUI-based Solana wallet built for the terminal.
 - **Live network context.** Watch RPC health, latency, slots, and wallet activity alongside your work.
 - **Keyboard and mouse.** Navigate with Vim keys, arrows, or clicks, with responsive layouts and built-in themes.
 
-## Run
+## Install
 
-```sh
-cargo install --path . --locked
-cd your-project
-solte
-```
+Prebuilt installers are pending the first release. For now, [build from source](docs/releases.md#build-from-source), then run `solte` in your project. macOS and Linux supported.
 
-macOS and Linux. Requires Rust 1.97.1+. Try `solte --demo --theme neon` without using real keys.
+Try `solte --demo --theme neon` without using real keys.
 
-[Usage and transaction support](docs/usage.md) · [Key-handling practices](docs/key-handling.md)
+[Usage](docs/usage.md) · [Installation and releases](docs/releases.md) · [Key handling](docs/key-handling.md) · [MIT license](LICENSE)
