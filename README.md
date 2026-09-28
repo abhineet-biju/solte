@@ -2,7 +2,9 @@
 
 A terminal wallet for Solana development. Manage project identities, fund wallets, inspect transactions, and keep network diagnostics beside your editor.
 
-![Solte's terminal interface with labeled demo data](docs/preview.png)
+![Solte Overview in the Neon theme with labeled demo data](docs/preview.png)
+
+The preview uses demo accounts and transactions. Try it with `solte --demo --theme neon`.
 
 ## Run
 
