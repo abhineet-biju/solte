@@ -49,12 +49,7 @@ impl Ui {
             x += width + 1;
         }
         let body = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
-        match app.pane {
-            Pane::Wallet => self.short_wallet(frame, app, body, theme),
-            Pane::Wallets => self.short_wallets(frame, app, body, theme),
-            Pane::Network => self.network(frame, app, body, theme),
-            Pane::Logs => self.logs(frame, app, body, theme),
-        }
+        self.workspace(frame, app, body, theme);
         let y = area.bottom() - 1;
         let message = app.busy.as_ref().unwrap_or(&app.status);
         frame.render_widget(
@@ -79,7 +74,7 @@ impl Ui {
         );
     }
 
-    fn short_wallets(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
+    pub(super) fn short_wallets(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(frame, app, area, Pane::Wallets, "Project identities", theme);
         let count = inner.height.saturating_sub(1) as usize;
         let offset = app.wallet_cursor.saturating_sub(count.saturating_sub(1));
@@ -144,7 +139,7 @@ impl Ui {
         );
     }
 
-    fn short_wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
+    pub(super) fn short_wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(frame, app, area, Pane::Wallet, "Wallet activity", theme);
         if app.tab == Tab::Settings {
             frame.render_widget(

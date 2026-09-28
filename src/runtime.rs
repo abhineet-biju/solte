@@ -162,7 +162,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                         _ => { redraw = false; None },
                     },
                     Event::Paste(text) => { app.paste(&text); None },
-                    Event::Resize(..) => None,
+                    Event::Resize(..) => { terminal.clear()?; None },
                     _ => { redraw = false; None },
                 };
                 let action = match action {

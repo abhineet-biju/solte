@@ -1,3 +1,4 @@
+mod layout;
 mod navigation;
 mod short;
 pub mod theme;
@@ -37,6 +38,7 @@ pub struct Ui {
     effect: Option<Effect>,
     effect_area: Rect,
     last_frame: Instant,
+    last_area: Rect,
 }
 
 impl Default for Ui {
@@ -48,6 +50,7 @@ impl Default for Ui {
             effect: None,
             effect_area: Rect::default(),
             last_frame: Instant::now(),
+            last_area: Rect::default(),
         }
     }
 }
@@ -133,6 +136,12 @@ impl Ui {
         self.hits.clear();
         let theme = Theme::named(&app.config.theme);
         let area = frame.area();
+        if self.last_area != area {
+            self.effect = None;
+            self.wallets = ListState::default();
+            self.transactions = TableState::default();
+            self.last_area = area;
+        }
         frame.render_widget(
             Block::default().style(Style::default().bg(theme.bg).fg(theme.text)),
             area,
@@ -155,27 +164,7 @@ impl Ui {
             ])
             .split(area);
             self.header(frame, app, outer[0], theme);
-            if app.zoomed || area.width < 100 || area.height < 34 {
-                self.draw_pane(frame, app, outer[1], app.pane, theme);
-            } else {
-                let body = Layout::vertical([
-                    Constraint::Min(14),
-                    Constraint::Length((area.height / 5).clamp(6, 10)),
-                ])
-                .spacing(1)
-                .split(outer[1]);
-                let columns = Layout::horizontal([
-                    Constraint::Length(25),
-                    Constraint::Min(42),
-                    Constraint::Length(if area.width >= 140 { 33 } else { 27 }),
-                ])
-                .spacing(1)
-                .split(body[0]);
-                self.draw_pane(frame, app, columns[0], Pane::Wallets, theme);
-                self.draw_pane(frame, app, columns[1], Pane::Wallet, theme);
-                self.draw_pane(frame, app, columns[2], Pane::Network, theme);
-                self.draw_pane(frame, app, body[1], Pane::Logs, theme);
-            }
+            self.workspace(frame, app, outer[1], theme);
             self.footer(frame, app, outer[2], theme);
         }
         if app.modal.is_some() {
