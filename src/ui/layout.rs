@@ -267,7 +267,7 @@ impl Ui {
 
 fn sidebar_sections(inner: Rect) -> (Rect, Rect, Rect) {
     let spacious = inner.height >= 8;
-    let reserved = if spacious { 4 } else { 2 };
+    let reserved = if spacious { 3 } else { 2 };
     (
         Rect::new(
             inner.x,
@@ -275,12 +275,7 @@ fn sidebar_sections(inner: Rect) -> (Rect, Rect, Rect) {
             inner.width,
             inner.height.saturating_sub(reserved),
         ),
-        Rect::new(
-            inner.x,
-            inner.bottom() - if spacious { 3 } else { 2 },
-            inner.width,
-            1,
-        ),
+        Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
         Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
     )
 }
