@@ -31,6 +31,17 @@ impl TransactionRecord {
         Some(i128::from(post) - i128::from(pre))
     }
 
+    pub fn activity(&self, address: &str) -> String {
+        if self.error.is_some() {
+            return "Failed".into();
+        }
+        match self.balance_change(address) {
+            Some(delta) if delta > 0 => "Received".into(),
+            Some(delta) if delta < -i128::from(self.fee().unwrap_or(0)) => "Sent".into(),
+            _ => self.kind(),
+        }
+    }
+
     pub fn kind(&self) -> String {
         if self.error.is_some() {
             return "Failed".into();
@@ -133,6 +144,13 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
+    pub fn signature(&self) -> Option<String> {
+        self.message
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .find(|part| part.parse::<solana_signature::Signature>().is_ok())
+            .map(str::to_owned)
+    }
+
     pub fn new(level: &str, message: impl Into<String>) -> Self {
         Self {
             timestamp: now(),
@@ -178,6 +196,42 @@ pub fn short(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_signatures_require_a_full_valid_signature() {
+        let signature = solana_signature::Signature::from([7; 64]).to_string();
+        assert_eq!(
+            LogEntry::new("INFO", format!("Confirmed ({signature}).")).signature(),
+            Some(signature)
+        );
+        let address = solana_pubkey::Pubkey::new_from_array([7; 32]).to_string();
+        assert!(
+            LogEntry::new("INFO", format!("Wallet {address}; 5abc…def"))
+                .signature()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn activity_distinguishes_inflow_outflow_fees_and_failures() {
+        let mut record = TransactionRecord {
+            signature: String::new(),
+            slot: 0,
+            timestamp: None,
+            error: None,
+            details: Some(
+                serde_json::json!({"transaction":{"message":{"accountKeys":["wallet"]}},"meta":{"fee":5,"preBalances":[100],"postBalances":[150]}}),
+            ),
+        };
+        assert_eq!(record.activity("wallet"), "Received");
+        record.details.as_mut().unwrap()["meta"]["postBalances"][0] = 50.into();
+        assert_eq!(record.activity("wallet"), "Sent");
+        record.details.as_mut().unwrap()["meta"]["postBalances"][0] = 95.into();
+        assert_eq!(record.activity("wallet"), "Transaction");
+        record.error = Some("Failed".into());
+        assert_eq!(record.activity("wallet"), "Failed");
+        assert_eq!(record.activity("other"), "Failed");
+    }
 
     #[test]
     fn missing_logs_are_not_reported_as_empty() {

@@ -15,6 +15,30 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn log_color(self, level: &str) -> Color {
+        match level {
+            "ERROR" => self.red,
+            "WARN" => self.accent,
+            "DEBUG" | "TRACE" => self.muted,
+            _ => self.text,
+        }
+    }
+
+    pub fn transaction_color(
+        self,
+        record: &crate::model::TransactionRecord,
+        address: &str,
+    ) -> Color {
+        if record.error.is_some() {
+            return self.red;
+        }
+        match record.balance_change(address) {
+            Some(delta) if delta > 0 => self.green,
+            Some(delta) if delta < -i128::from(record.fee().unwrap_or(0)) => self.red,
+            _ => self.heading,
+        }
+    }
+
     pub fn control(self) -> Style {
         Style::default().fg(self.text).bg(self.selected)
     }
