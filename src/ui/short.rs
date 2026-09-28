@@ -99,7 +99,10 @@ impl Ui {
     pub(super) fn short_wallets(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(frame, app, area, Pane::Wallets, "Project identities", theme);
         let stacked = inner.width < 44;
-        let count = inner.height.saturating_sub(if stacked { 2 } else { 1 }) as usize;
+        let count = inner
+            .height
+            .saturating_sub(if stacked { 2 } else { 1 } + u16::from(inner.height >= 8))
+            as usize;
         let offset = app.wallet_cursor.saturating_sub(count.saturating_sub(1));
         if app.wallets.is_empty() {
             frame.render_widget(
@@ -231,8 +234,9 @@ impl Ui {
             );
             x += width + 1;
         }
-        let data_y = toolbar_y + 1;
         let toolbar_rows = toolbar_y - inner.y;
+        let gap = u16::from(inner.height.saturating_sub(toolbar_rows) >= 6);
+        let data_y = toolbar_y + 1 + gap;
         let visible = app.visible_records();
         let filtered = u16::from(!app.filter.is_empty());
         if filtered > 0 {
@@ -242,7 +246,9 @@ impl Ui {
                 Rect::new(inner.x, data_y, inner.width, 1),
             );
         }
-        let count = inner.height.saturating_sub(2 + toolbar_rows + filtered) as usize;
+        let count = inner
+            .height
+            .saturating_sub(2 + toolbar_rows + filtered + gap * 2) as usize;
         let offset = app
             .transaction_cursor
             .saturating_sub(count.saturating_sub(1));

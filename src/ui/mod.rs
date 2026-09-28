@@ -1001,6 +1001,13 @@ impl Ui {
                 theme,
             );
         }
+        let top_gap = u16::from(inner.height >= 3);
+        let inner = Rect::new(
+            inner.x,
+            inner.y + top_gap,
+            inner.width,
+            inner.height.saturating_sub(top_gap),
+        );
         let query = if app.view == View::Logs {
             app.log_filter.to_lowercase()
         } else {
@@ -1046,7 +1053,9 @@ impl Ui {
                 inner.x,
                 inner.y,
                 inner.width,
-                inner.height.saturating_sub(1),
+                inner
+                    .height
+                    .saturating_sub(1 + u16::from(inner.height >= 5)),
             )
         } else {
             inner
@@ -1718,7 +1727,13 @@ impl Ui {
                 Line::from(Span::styled(line, Style::default().fg(color)))
             })
             .collect();
-        let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(2));
+        let gap = u16::from(area.height >= 10);
+        let content = Rect::new(
+            area.x,
+            area.y + gap,
+            area.width,
+            area.height.saturating_sub(2 + gap * 2),
+        );
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let total = paragraph.line_count(content.width);
         self.modal_scroll_limit = total

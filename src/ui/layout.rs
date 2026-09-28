@@ -71,7 +71,7 @@ impl Ui {
         }
         let logs_height = match area.height {
             22.. => (area.height / 5).clamp(5, 9),
-            14..=21 => 4,
+            14..=21 => 5,
             11..=13 => 3,
             _ => 0,
         };
