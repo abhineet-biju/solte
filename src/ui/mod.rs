@@ -99,9 +99,9 @@ impl Ui {
         active: bool,
     ) {
         let style = if active {
-            Style::default().fg(theme.bg).bg(theme.accent).bold()
+            theme.selected_control()
         } else {
-            Style::default().fg(theme.text).bg(theme.selected)
+            theme.control()
         };
         frame.render_widget(Paragraph::new(format!(" {text} ")).style(style), area);
         self.target(area, action);
@@ -146,7 +146,7 @@ impl Ui {
             "Create wallet n",
             Action::New,
             theme,
-            true,
+            false,
         );
         self.button(
             frame,
@@ -263,9 +263,7 @@ impl Ui {
             }
         }
         self.last_frame = Instant::now();
-        if app.modal.is_none() {
-            self.paint_control_focus(frame, app, theme);
-        }
+        self.paint_control_focus(frame, app, theme);
     }
 
     fn header(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
@@ -1246,11 +1244,7 @@ impl Ui {
                     );
                     let field_area = Rect::new(inner.x, y + 1, inner.width, 1);
                     frame.render_widget(
-                        Paragraph::new(value).style(
-                            Style::default()
-                                .fg(if active { theme.accent } else { theme.text })
-                                .bg(theme.selected),
-                        ),
+                        Paragraph::new(value).style(theme.input(active)),
                         field_area,
                     );
                     self.target(field_area, Action::Field(index));
@@ -1313,7 +1307,7 @@ impl Ui {
                     form.submit_label(),
                     Action::Submit,
                     theme,
-                    true,
+                    false,
                 );
             }
             Modal::Profiles { selected } => {
@@ -1443,7 +1437,7 @@ impl Ui {
                         "Sign & submit  Enter",
                         Action::Submit,
                         theme,
-                        true,
+                        false,
                     );
                 }
             }
@@ -1455,7 +1449,7 @@ impl Ui {
                     "h j k l / arrows      Navigate inside the focused panel",
                     "k at the top          Focus the main panel selector",
                     "h/l in selector       Select panel; j/Enter enters it",
-                    "Enter                 Activate the underlined control",
+                    "Enter                 Activate the highlighted control",
                     "z                     Expand or restore focused panel",
                     "v                     Cycle Overview / Transactions / Settings",
                     "",
@@ -1641,6 +1635,94 @@ pub fn snapshot(app: &App, path: &Path, width: u16, height: u16) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    fn assert_focus(terminal: &Terminal<TestBackend>, ui: &Ui, action: Action, theme: Theme) {
+        let buffer = terminal.backend().buffer();
+        let hit = ui
+            .hits
+            .iter()
+            .find(|hit| hit.action == action && buffer[(hit.area.x, hit.area.y)].bg == theme.accent)
+            .unwrap();
+        for y in buffer.area.y..buffer.area.bottom() {
+            for x in buffer.area.x..buffer.area.right() {
+                let cell = &buffer[(x, y)];
+                if cell.bg == theme.accent {
+                    assert!(
+                        hit.area.contains((x, y).into()),
+                        "Unexpected accent background at {x},{y} for {action:?}"
+                    );
+                    assert_eq!(cell.fg, theme.bg);
+                }
+            }
+        }
+        assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn one_focus_highlight_follows_navigation_and_dialog_choices() {
+        for name in ["ember", "glacier", "orchid"] {
+            for (width, height) in [(60, 10), (90, 22), (140, 42)] {
+                let mut app = App::new("/test".into(), Config::default(), vec![]);
+                app.config.theme = name.into();
+                app.pane = Pane::Wallet;
+                let theme = Theme::named(name);
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                app.focused_control = Some(Action::New);
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_focus(&terminal, &ui, Action::New, theme);
+                // Wide layouts stack these controls; compact layouts place them side by side.
+                let create = ui
+                    .hits
+                    .iter()
+                    .rev()
+                    .find(|hit| hit.action == Action::New)
+                    .unwrap()
+                    .area;
+                let import = ui
+                    .hits
+                    .iter()
+                    .rev()
+                    .find(|hit| hit.action == Action::Import)
+                    .unwrap()
+                    .area;
+                let direction = if import.y > create.y {
+                    crate::app::Direction::Down
+                } else {
+                    crate::app::Direction::Right
+                };
+                ui.navigate_control(&mut app, direction);
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_eq!(ui.focused_action(&app), Some(Action::Import));
+                assert_focus(&terminal, &ui, Action::Import, theme);
+                app.selector_focus = true;
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_focus(&terminal, &ui, Action::Selector(Pane::Wallet), theme);
+                app.modal = Some(Modal::Appearance {
+                    kind: Appearance::Theme,
+                    selected: 0,
+                });
+                app.navigate(&Action::Scroll(1));
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_focus(
+                    &terminal,
+                    &ui,
+                    Action::SelectAppearance(Appearance::Theme, 1),
+                    theme,
+                );
+                app.modal = Some(Modal::Profiles { selected: 1 });
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_focus(&terminal, &ui, Action::SelectProfile(1), theme);
+                app.open_form(crate::app::FormKind::Import);
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_focus(&terminal, &ui, Action::Field(0), theme);
+                app.navigate(&Action::Field(1));
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                assert_focus(&terminal, &ui, Action::Field(1), theme);
+            }
+        }
+    }
 
     #[test]
     fn inspector_clamps_scroll_and_compact_search_remains_visible() {

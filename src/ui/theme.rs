@@ -1,4 +1,4 @@
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 
 #[derive(Clone, Copy)]
 pub struct Theme {
@@ -14,6 +14,30 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn control(self) -> Style {
+        Style::default().fg(self.text).bg(self.selected)
+    }
+
+    pub fn selected_control(self) -> Style {
+        self.control().fg(self.accent).add_modifier(Modifier::BOLD)
+    }
+
+    pub fn focused_control(self) -> Style {
+        Style::default()
+            .fg(self.bg)
+            .bg(self.accent)
+            .add_modifier(Modifier::BOLD)
+            .remove_modifier(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::DIM)
+    }
+
+    pub fn input(self, focused: bool) -> Style {
+        if focused {
+            self.focused_control()
+        } else {
+            self.control()
+        }
+    }
+
     pub fn named(name: &str) -> Self {
         let mut theme = Self {
             bg: Color::Rgb(12, 16, 18),

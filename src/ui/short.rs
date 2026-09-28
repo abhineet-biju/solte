@@ -338,7 +338,7 @@ impl Ui {
         let field_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
         frame.render_widget(
             Paragraph::new(format!(" {prefix}▏{}", &field.value[field.cursor..]))
-                .style(Style::default().fg(theme.accent).bg(theme.selected)),
+                .style(theme.input(true)),
             field_area,
         );
         self.target(field_area, Action::Field(form.active));
@@ -383,7 +383,7 @@ impl Ui {
             form.submit_label(),
             Action::Submit,
             theme,
-            true,
+            false,
         );
     }
 }

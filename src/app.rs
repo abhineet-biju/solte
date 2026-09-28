@@ -461,12 +461,18 @@ impl App {
                     Some(Action::CopyAddress)
                 }
                 KeyCode::Tab
-                    if matches!(modal, Modal::Funding { .. } | Modal::Appearance { .. }) =>
+                    if matches!(
+                        modal,
+                        Modal::Funding { .. } | Modal::Appearance { .. } | Modal::Profiles { .. }
+                    ) =>
                 {
                     Some(Action::Scroll(1))
                 }
                 KeyCode::BackTab
-                    if matches!(modal, Modal::Funding { .. } | Modal::Appearance { .. }) =>
+                    if matches!(
+                        modal,
+                        Modal::Funding { .. } | Modal::Appearance { .. } | Modal::Profiles { .. }
+                    ) =>
                 {
                     Some(Action::Scroll(-1))
                 }

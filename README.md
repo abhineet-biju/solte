@@ -70,7 +70,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 
 Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. The RPC sidebar stays visible from 80 columns, and the identity sidebar joins it from 100 columns, including in short panes. Narrower windows show the focused panel; the top navigation keeps every panel accessible. Short panes use a compact header, single-row wallet controls, and scrollable activity. A compact session log remains visible when there is enough vertical room, including when a pane is expanded. Expanding the log itself uses the full workspace. Short dialogs show one field at a time with Previous and Next controls. The minimum supported size is 60 columns by 10 rows; 120 by 36 or larger provides more room. Below the minimum, Solte reports the actual column and row count.
 
-The underlined control has keyboard focus. Directional navigation stays inside the selected panel until you press k/up at its top edge. This focuses the main selector: h/l selects a panel, and j/down or Enter enters it. Enter on a control activates the same action as a mouse click. In text fields, type normally, use left/right to move the cursor, and Tab/Shift-Tab to change fields.
+The highlighted control has keyboard focus. Directional navigation stays inside the selected panel until you press k/up at its top edge. This focuses the main selector: h/l selects a panel, and j/down or Enter enters it. Enter on a control activates the same action as a mouse click. In text fields, type normally, use left/right to move the cursor, and Tab/Shift-Tab to change fields.
 
 ## Local data and monitoring
 
@@ -124,3 +124,5 @@ These checks only accept loopback RPC endpoints and create disposable keypairs. 
 The source is organized around wallet operations, network monitoring, local storage, application state, rendering, and runtime coordination. Rendering does no network or disk I/O. A session identifier prevents stale responses from updating a newly selected wallet or profile.
 
 Transaction inspectors support Home/End and bounded scrolling with a position indicator. Escape closes a dialog without changing the underlying expanded layout. In offline mode, funding and sending explain their unavailability before opening a form.
+
+Interaction styling is shared across all themes: a solid accent background marks the focused control or editable field; muted backgrounds and accent text indicate selection without focus. Wallet activity, errors, and connection health retain explicit symbols or labels. Moving focus never changes the active wallet until it is activated. Dialogs own focus while open, and closing them restores the underlying pane and focus. In forms, the highlighted field receives typing; Enter submits the form.

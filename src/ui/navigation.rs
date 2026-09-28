@@ -1,11 +1,7 @@
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::{Modifier, Style},
-};
+use ratatui::{Frame, layout::Rect};
 
 use super::{Hit, Ui, theme::Theme};
-use crate::app::{Action, App, Direction, Pane, Tab};
+use crate::app::{Action, App, Direction, Modal, Pane, Tab};
 
 impl Ui {
     fn pane_area(&self, pane: Pane) -> Option<Rect> {
@@ -157,32 +153,35 @@ impl Ui {
     }
 
     pub(super) fn paint_control_focus(&self, frame: &mut Frame, app: &App, theme: Theme) {
-        if app.selector_focus {
-            if let Some(hit) = self
-                .hits
-                .iter()
-                .find(|hit| hit.action == Action::Selector(app.pane))
-            {
-                frame.buffer_mut().set_style(
-                    hit.area,
-                    Style::default()
-                        .fg(theme.accent)
-                        .bg(theme.selected)
-                        .add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
-                );
+        let action = match &app.modal {
+            Some(Modal::Appearance { kind, selected }) => {
+                Some(Action::SelectAppearance(*kind, *selected))
             }
-            return;
-        }
-        if let Some(action) = self.focused_action(app)
-            && let Some(hit) = self
-                .controls(app.pane)
-                .into_iter()
-                .find(|hit| hit.action == action)
-        {
-            frame.buffer_mut().set_style(
-                hit.area,
-                Style::default().add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
-            );
+            Some(Modal::Profiles { selected }) => Some(Action::SelectProfile(*selected)),
+            Some(Modal::Funding { selected, .. }) => Some(match selected {
+                0 => Action::BrowserFaucet(crate::funding::Faucet::Solana),
+                1 => Action::BrowserFaucet(crate::funding::Faucet::Quicknode),
+                _ => Action::RpcAirdrop,
+            }),
+            Some(Modal::Form(form)) => Some(Action::Field(form.active)),
+            Some(Modal::Review { prepared, .. }) if prepared.simulation_error.is_none() => {
+                Some(Action::Submit)
+            }
+            Some(_) => None,
+            None if app.selector_focus => Some(Action::Selector(app.pane)),
+            None => self.focused_action(app),
+        };
+        if let Some(action) = action {
+            let candidates = if app.modal.is_some() || app.selector_focus {
+                self.hits.iter().collect()
+            } else {
+                self.controls(app.pane)
+            };
+            if let Some(hit) = candidates.into_iter().find(|hit| hit.action == action) {
+                frame
+                    .buffer_mut()
+                    .set_style(hit.area, theme.focused_control());
+            }
         }
     }
 }
