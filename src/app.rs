@@ -59,6 +59,7 @@ pub enum Action {
     ForceQuit,
     Quit,
     Focus(Pane),
+    Selector(Pane),
     CycleFocus(bool),
     Navigate(Direction),
     Move(i32),
@@ -259,6 +260,7 @@ pub struct App {
     pub wallet_cursor: usize,
     pub pane: Pane,
     pub focused_control: Option<Action>,
+    pub selector_focus: bool,
     pub tab: Tab,
     pub records: Vec<TransactionRecord>,
     pub transaction_cursor: usize,
@@ -297,6 +299,7 @@ impl App {
             wallet_cursor: selected_wallet,
             pane: Pane::Wallet,
             focused_control: None,
+            selector_focus: false,
             tab: Tab::Overview,
             records: Vec::new(),
             transaction_cursor: 0,
@@ -455,17 +458,27 @@ impl App {
     pub fn navigate(&mut self, action: &Action) -> bool {
         match *action {
             Action::Focus(pane) => {
+                self.selector_focus = false;
                 if self.pane != pane {
                     self.focused_control = None;
                 }
                 self.pane = pane;
             }
             Action::CycleFocus(forward) => {
+                self.selector_focus = false;
                 let index = Pane::ALL.iter().position(|p| *p == self.pane).unwrap_or(0);
                 self.pane = Pane::ALL[(index + if forward { 1 } else { 3 }) % 4];
                 self.focused_control = None;
             }
+            Action::Selector(pane) => {
+                if self.pane != pane {
+                    self.focused_control = None;
+                }
+                self.pane = pane;
+                self.selector_focus = true;
+            }
             Action::SetTab(tab) => {
+                self.selector_focus = false;
                 self.pane = Pane::Wallet;
                 self.tab = tab;
                 self.focused_control = Some(Action::SetTab(tab));

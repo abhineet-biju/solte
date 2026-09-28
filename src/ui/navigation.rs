@@ -30,6 +30,9 @@ impl Ui {
     }
 
     pub fn focused_action(&self, app: &App) -> Option<Action> {
+        if app.selector_focus {
+            return Some(Action::Focus(app.pane));
+        }
         let controls = self.controls(app.pane);
         let default = match app.pane {
             Pane::Wallets if !app.wallets.is_empty() => Action::SelectWallet(app.wallet_cursor),
@@ -61,6 +64,7 @@ impl Ui {
                     .is_some_and(|area| area.contains((x, y).into()))
                 {
                     app.pane = pane;
+                    app.selector_focus = false;
                     app.focused_control = Some(action.clone());
                     break;
                 }
@@ -70,6 +74,28 @@ impl Ui {
     }
 
     pub fn navigate_control(&self, app: &mut App, direction: Direction) {
+        if app.selector_focus {
+            match direction {
+                Direction::Left | Direction::Right => {
+                    let index = Pane::ALL
+                        .iter()
+                        .position(|pane| *pane == app.pane)
+                        .unwrap_or(0);
+                    let next = if direction == Direction::Left {
+                        index.saturating_sub(1)
+                    } else {
+                        (index + 1).min(Pane::ALL.len() - 1)
+                    };
+                    if next != index {
+                        app.focused_control = None;
+                    }
+                    app.pane = Pane::ALL[next];
+                }
+                Direction::Down => app.selector_focus = false,
+                Direction::Up => {}
+            }
+            return;
+        }
         let Some(current) = self.focused_action(app) else {
             return;
         };
@@ -114,6 +140,8 @@ impl Ui {
             .min_by_key(|(score, _)| *score);
         if let Some((_, action)) = next {
             Self::focus(app, action);
+        } else if direction == Direction::Up {
+            app.selector_focus = true;
         } else if delta != 0 && matches!(app.pane, Pane::Network | Pane::Logs) {
             app.navigate(&Action::Move(delta as i32));
         }
@@ -129,6 +157,22 @@ impl Ui {
     }
 
     pub(super) fn paint_control_focus(&self, frame: &mut Frame, app: &App, theme: Theme) {
+        if app.selector_focus {
+            if let Some(hit) = self
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Selector(app.pane))
+            {
+                frame.buffer_mut().set_style(
+                    hit.area,
+                    Style::default()
+                        .fg(theme.accent)
+                        .bg(theme.selected)
+                        .add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
+                );
+            }
+            return;
+        }
         if let Some(action) = self.focused_action(app)
             && let Some(hit) = self
                 .controls(app.pane)
@@ -274,6 +318,30 @@ mod tests {
             assert_eq!(ui.focused_action(&app), Some(Action::Motion));
             ui.navigate_control(&mut app, Direction::Left);
             assert_eq!(ui.focused_action(&app), Some(Action::Theme));
+        }
+    }
+
+    #[test]
+    fn up_reaches_main_selector_and_down_reenters_selected_pane() {
+        for (width, height) in [(60, 10), (120, 16), (160, 48)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            demo::populate(&mut app);
+            let mut ui = Ui::default();
+            render(&mut ui, &app, width, height);
+            for _ in 0..12 {
+                ui.navigate_control(&mut app, Direction::Up);
+                if app.selector_focus {
+                    break;
+                }
+            }
+            assert!(app.selector_focus);
+            ui.navigate_control(&mut app, Direction::Right);
+            assert_eq!(app.pane, Pane::Network);
+            ui.navigate_control(&mut app, Direction::Left);
+            assert_eq!(app.pane, Pane::Wallet);
+            ui.navigate_control(&mut app, Direction::Down);
+            assert!(!app.selector_focus);
+            assert_eq!(app.pane, Pane::Wallet);
         }
     }
 }

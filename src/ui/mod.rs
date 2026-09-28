@@ -241,7 +241,7 @@ impl Ui {
                 frame,
                 Rect::new(x, area.y + 3, width.min(area.right().saturating_sub(x)), 1),
                 &label,
-                Action::Focus(*pane),
+                Action::Selector(*pane),
                 theme,
                 app.pane == *pane,
             );
@@ -1282,6 +1282,8 @@ impl Ui {
                     "Tab / Shift-Tab       Next / previous panel",
                     "1 / 2 / 3 / 4         Wallets / activity / network / logs",
                     "h j k l / arrows      Navigate inside the focused panel",
+                    "k at the top          Focus the main panel selector",
+                    "h/l in selector       Select panel; j/Enter enters it",
                     "Enter                 Activate the underlined control",
                     "z                     Expand or restore focused panel",
                     "v                     Cycle Overview / Transactions / Settings",
@@ -1472,7 +1474,7 @@ mod tests {
             assert!(
                 ui.hits
                     .iter()
-                    .any(|h| h.action == Action::Focus(Pane::Network))
+                    .any(|h| h.action == Action::Selector(Pane::Network))
             );
             assert!(
                 ui.hits

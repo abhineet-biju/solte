@@ -42,7 +42,7 @@ impl Ui {
                 frame,
                 Rect::new(x, area.y + 1, width, 1),
                 &label,
-                Action::Focus(*pane),
+                Action::Selector(*pane),
                 theme,
                 app.pane == *pane,
             );
