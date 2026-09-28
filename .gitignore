@@ -1,0 +1,5 @@
+/target/
+/.solte/
+*.keypair.json
+.DS_Store
+
