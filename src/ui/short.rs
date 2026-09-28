@@ -1,4 +1,10 @@
-use ratatui::{Frame, layout::Rect, style::Style, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
+};
 
 use super::{Ui, theme::Theme};
 use crate::{
@@ -10,21 +16,26 @@ use crate::{
 impl Ui {
     pub(super) fn short_layout(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         frame.render_widget(
-            Paragraph::new(format!(
-                " SOLTE · {} · {}{}",
-                app.profile().name,
-                app.wallet()
-                    .map(|wallet| wallet.name.as_str())
-                    .unwrap_or("No wallet"),
-                if app.demo { "  ·  DEMO" } else { "" }
-            ))
-            .style(Style::default().fg(theme.accent)),
+            Paragraph::new(Line::from(vec![
+                Span::styled(" S O L T E", Style::default().fg(theme.heading).bold()),
+                Span::styled(
+                    format!(
+                        " · {} · {}{}",
+                        app.profile().name,
+                        app.wallet()
+                            .map(|wallet| wallet.name.as_str())
+                            .unwrap_or("No wallet"),
+                        if app.demo { " · DEMO" } else { "" }
+                    ),
+                    Style::default().fg(theme.text),
+                ),
+            ])),
             Rect::new(area.x, area.y, area.width.saturating_sub(22), 1),
         );
         self.button(
             frame,
             Rect::new(area.right() - 21, area.y, 10, 1),
-            "Theme t",
+            "Theme [t]",
             Action::Theme,
             theme,
             false,
@@ -32,15 +43,15 @@ impl Ui {
         self.button(
             frame,
             Rect::new(area.right() - 10, area.y, 10, 1),
-            "Motion m",
+            "Motion [m]",
             Action::Motion,
             theme,
             false,
         );
         let mut x = area.x;
         for (i, view) in View::ALL.iter().enumerate() {
-            let label = format!("{} {}", i + 1, view.nav_label(area.width));
-            let width = label.len() as u16 + 2;
+            let label = format!("[{}] {}", i + 1, view.nav_label(area.width));
+            let width = label.len() as u16;
             self.button(
                 frame,
                 Rect::new(x, area.y + 1, width, 1),
@@ -62,7 +73,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(area.right() - 18, y, 9, 1),
-            "? Help",
+            "Help [?]",
             Action::Help,
             theme,
             false,
@@ -70,7 +81,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(area.right() - 8, y, 8, 1),
-            "q Quit",
+            "Quit [q]",
             Action::Quit,
             theme,
             false,
@@ -120,7 +131,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x, y, 17, 1),
-            "New identity n",
+            "New wallet [n]",
             Action::New,
             theme,
             false,
@@ -128,7 +139,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x + 18, y, 12, 1),
-            "Import i",
+            "Import [i]",
             Action::Import,
             theme,
             false,
@@ -141,7 +152,7 @@ impl Ui {
                 12,
                 1,
             ),
-            "Cycle ]",
+            "Cycle []]",
             Action::NextWallet,
             theme,
             false,
@@ -179,11 +190,11 @@ impl Ui {
         let mut x = inner.x;
         let mut toolbar_y = inner.y + 1;
         for (label, action) in [
-            ("Fund f", Action::Fund),
-            ("Send s", Action::Send),
-            ("Copy y", Action::CopyAddress),
+            ("Fund [f]", Action::Fund),
+            ("Send [s]", Action::Send),
+            ("Copy [y]", Action::CopyAddress),
             ("Explorer", Action::ExplorerWallet),
-            ("RPC p", Action::Profiles),
+            ("RPC [p]", Action::Profiles),
         ] {
             let width = label.len() as u16 + 2;
             if x + width > inner.right() {
@@ -257,7 +268,7 @@ impl Ui {
         if visible.is_empty() {
             frame.render_widget(
                 Paragraph::new(if app.failures_only {
-                    " No matching failed transactions. e shows all."
+                    " No matching failed transactions. [e] shows all."
                 } else {
                     " No matching captured transactions."
                 })
@@ -270,9 +281,9 @@ impl Ui {
             frame,
             Rect::new(inner.x, y, 10, 1),
             if app.filter.is_empty() {
-                "Find /"
+                "Find [/]"
             } else {
-                "Clear x"
+                "Clear [x]"
             },
             if app.filter.is_empty() {
                 Action::Search
@@ -286,9 +297,9 @@ impl Ui {
             frame,
             Rect::new(inner.x + 11, y, 12, 1),
             if app.failures_only {
-                "Errors ✓ e"
+                "Errors ✓ [e]"
             } else {
-                "Errors e"
+                "Errors [e]"
             },
             Action::Failures,
             theme,
@@ -300,7 +311,7 @@ impl Ui {
             if app.history_loading {
                 "Loading…"
             } else {
-                "Older b"
+                "Older [b]"
             },
             Action::Older,
             theme,
@@ -356,7 +367,7 @@ impl Ui {
         let note = form
             .error
             .as_deref()
-            .unwrap_or("Tab: next field · Enter: submit · Esc: cancel");
+            .unwrap_or("[Tab] next field · [Enter] submit · [Esc] cancel");
         frame.render_widget(
             Paragraph::new(note).style(Style::default().fg(if form.error.is_some() {
                 theme.red

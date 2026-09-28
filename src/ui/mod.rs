@@ -106,7 +106,12 @@ impl Ui {
         } else {
             theme.control()
         };
-        frame.render_widget(Paragraph::new(format!(" {text} ")).style(style), area);
+        frame.render_widget(
+            Paragraph::new(text)
+                .alignment(ratatui::layout::Alignment::Center)
+                .style(style),
+            area,
+        );
         self.target(area, action);
     }
     fn shortcut_button(
@@ -170,7 +175,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(area.x, y, 18.min(area.width), 1),
-            "Create wallet n",
+            "Create wallet [n]",
             Action::New,
             theme,
             false,
@@ -183,7 +188,7 @@ impl Ui {
                 19.min(area.width),
                 1,
             ),
-            "Import keypair i",
+            "Import keypair [i]",
             Action::Import,
             theme,
             false,
@@ -246,7 +251,7 @@ impl Ui {
         );
         if area.width < 60 || area.height < 10 {
             frame.render_widget(
-                Paragraph::new(format!("SOLTE\n\nTerminal: {} columns × {} rows\nMinimum: 60 × 10. Resize or reduce the font size.\nPress q to quit.", area.width, area.height))
+                Paragraph::new(format!("SOLTE\n\nTerminal: {} columns × {} rows\nMinimum: 60 × 10. Resize or reduce the font size.\nPress [q] to quit.", area.width, area.height))
                 .style(Style::default().fg(theme.accent)),
                 area,
             );
@@ -281,24 +286,29 @@ impl Ui {
     }
 
     fn header(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let brand = Line::from(vec![
-            Span::styled("  S O L T E", Style::default().fg(theme.accent).bold()),
-            Span::styled(
-                "   /   DEVELOPMENT WALLET",
-                Style::default().fg(theme.muted),
-            ),
-            Span::styled(
-                if app.demo {
-                    "   DEMO · offline fixtures"
-                } else {
-                    ""
-                },
-                Style::default().fg(theme.accent),
-            ),
-        ]);
+        let mark = vec![
+            Line::from(Span::styled(
+                "█▀▀ █▀█ █   ▀█▀ █▀▀",
+                Style::default().fg(theme.heading).bold(),
+            )),
+            Line::from(Span::styled(
+                "▀▀█ █ █ █    █  █▀▀",
+                Style::default().fg(theme.accent).bold(),
+            )),
+            Line::from(Span::styled(
+                "▀▀▀ ▀▀▀ ▀▀▀  ▀  ▀▀▀",
+                Style::default().fg(theme.heading).bold(),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(mark), Rect::new(area.x + 1, area.y, 20, 3));
         frame.render_widget(
-            Paragraph::new(brand),
-            Rect::new(area.x, area.y, area.width, 1),
+            Paragraph::new(if app.demo {
+                "SOLTE · DEMO"
+            } else {
+                "SOLTE · DEVELOPMENT WALLET"
+            })
+            .style(Style::default().fg(theme.text).bold()),
+            Rect::new(area.x + 24, area.y, area.width.saturating_sub(51), 1),
         );
         let project = app
             .root
@@ -307,24 +317,18 @@ impl Ui {
             .unwrap_or("project");
         frame.render_widget(
             Paragraph::new(format!(
-                "  {project}  ·  {}  ·  {} identities  ·  {}",
+                "{} · {project}",
                 app.wallet()
                     .map(|wallet| wallet.name.as_str())
                     .unwrap_or("No wallet selected"),
-                app.wallets.len(),
-                if app.connected {
-                    "connected"
-                } else {
-                    "offline / connecting"
-                }
             ))
             .style(Style::default().fg(theme.muted)),
-            Rect::new(area.x, area.y + 1, area.width.saturating_sub(22), 1),
+            Rect::new(area.x + 24, area.y + 1, area.width.saturating_sub(46), 1),
         );
         self.button(
             frame,
             Rect::new(area.right() - 21, area.y + 1, 10, 1),
-            "Theme t",
+            "Theme [t]",
             Action::Theme,
             theme,
             false,
@@ -332,15 +336,15 @@ impl Ui {
         self.button(
             frame,
             Rect::new(area.right() - 10, area.y + 1, 10, 1),
-            "Motion m",
+            "Motion [m]",
             Action::Motion,
             theme,
             false,
         );
         let mut x = area.x + 1;
         for (i, view) in View::ALL.iter().enumerate() {
-            let label = format!("{} {}", i + 1, view.nav_label(area.width));
-            let width = label.len() as u16 + 2;
+            let label = format!("[{}] {}", i + 1, view.nav_label(area.width));
+            let width = label.len() as u16;
             self.button(
                 frame,
                 Rect::new(x, area.y + 3, width.min(area.right().saturating_sub(x)), 1),
@@ -352,8 +356,15 @@ impl Ui {
             x += width + 1;
         }
         if area.width > 84 {
-            let label = format!("{} ▾", app.profile().name);
-            let width = (label.chars().count() as u16 + 3).min(25);
+            let mut name = clean_text(&app.profile().name);
+            if Line::from(name.as_str()).width() > 15 {
+                while Line::from(name.as_str()).width() > 14 {
+                    name.pop();
+                }
+                name.push('…');
+            }
+            let label = format!("{name} [p] ▾");
+            let width = (Line::from(label.as_str()).width() as u16 + 2).min(25);
             self.button(
                 frame,
                 Rect::new(area.right() - width - 1, area.y, width, 1),
@@ -438,7 +449,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(regions[1].x, regions[1].y, regions[1].width, 1),
-            "+ New identity    n",
+            "New wallet [n]",
             Action::New,
             theme,
             false,
@@ -446,13 +457,13 @@ impl Ui {
         self.button(
             frame,
             Rect::new(regions[1].x, regions[1].y + 2, regions[1].width, 1),
-            "Import keypair    i",
+            "Import keypair [i]",
             Action::Import,
             theme,
             false,
         );
         frame.render_widget(
-            Paragraph::new("] Cycle identity").style(Style::default().fg(theme.muted)),
+            Paragraph::new("Cycle identity []]").style(Style::default().fg(theme.muted)),
             Rect::new(regions[1].x, regions[1].y + 4, regions[1].width, 1),
         );
         self.target(
@@ -489,9 +500,9 @@ impl Ui {
             );
             let mut x = body.x;
             for (label, action) in [
-                ("Fund f", Action::Fund),
-                ("Send s", Action::Send),
-                ("Copy y", Action::CopyAddress),
+                ("Fund [f]", Action::Fund),
+                ("Send [s]", Action::Send),
+                ("Copy [y]", Action::CopyAddress),
                 ("Explorer", Action::ExplorerWallet),
             ] {
                 let width = label.len() as u16 + 2;
@@ -522,7 +533,7 @@ impl Ui {
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(short(&wallet.address), Style::default().fg(theme.muted)),
-                    Span::styled("  [copy y]  [explorer]", Style::default().fg(theme.green)),
+                    Span::styled("  Copy [y]  Explorer", Style::default().fg(theme.green)),
                 ])),
                 Rect::new(body.x, body.y, body.width, 1),
             );
@@ -572,7 +583,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(body.x, body.y + 6, 16, 1),
-                "↓ Fund wallet f",
+                "Fund wallet [f]",
                 Action::Fund,
                 theme,
                 false,
@@ -585,7 +596,7 @@ impl Ui {
                     14.min(body.width.saturating_sub(18)),
                     1,
                 ),
-                "↑ Send SOL s",
+                "Send SOL [s]",
                 Action::Send,
                 theme,
                 false,
@@ -614,7 +625,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(body.x, body.y + 2, 16, 1),
-                "↓ Fund wallet f",
+                "Fund wallet [f]",
                 Action::Fund,
                 theme,
                 false,
@@ -622,7 +633,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(body.x + 18, body.y + 2, 14, 1),
-                "↑ Send SOL s",
+                "Send SOL [s]",
                 Action::Send,
                 theme,
                 false,
@@ -663,11 +674,11 @@ impl Ui {
         if area.width > 36 {
             self.button(
                 frame,
-                Rect::new(area.right() - 18, area.y, 8, 1),
+                Rect::new(area.right() - 20, area.y, 8, 1),
                 if app.filter.is_empty() {
-                    "Find /"
+                    "Find [/]"
                 } else {
-                    "Clear x"
+                    "Clear [x]"
                 },
                 if app.filter.is_empty() {
                     Action::Search
@@ -679,11 +690,11 @@ impl Ui {
             );
             self.button(
                 frame,
-                Rect::new(area.right() - 9, area.y, 9, 1),
+                Rect::new(area.right() - 10, area.y, 10, 1),
                 if app.failures_only {
-                    "All e"
+                    "All [e]"
                 } else {
-                    "Errors e"
+                    "Errors [e]"
                 },
                 Action::Failures,
                 theme,
@@ -774,7 +785,7 @@ impl Ui {
         if visible.is_empty() && table_area.height > 3 {
             frame.render_widget(
                 Paragraph::new(if app.failures_only {
-                    "No matching failed transactions. Press e to show all."
+                    "No matching failed transactions. Press [e] to show all."
                 } else if app.connected {
                     "No matching transactions in captured history."
                 } else {
@@ -795,7 +806,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(area.x, y, 15.min(area.width), 1),
-                "Inspect Enter",
+                "Inspect [Enter]",
                 Action::Inspect,
                 theme,
                 false,
@@ -807,7 +818,7 @@ impl Ui {
                     if app.history_loading {
                         "Loading…"
                     } else {
-                        "Older history b"
+                        "Older [b]"
                     },
                     Action::Older,
                     theme,
@@ -956,7 +967,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x, inner.bottom() - 1, 18, 1),
-            "RPC profiles p",
+            "RPC profiles [p]",
             Action::Profiles,
             theme,
             false,
@@ -980,9 +991,9 @@ impl Ui {
                 frame,
                 Rect::new(area.right() - 30, area.y, 17, 1),
                 if app.follow {
-                    "Following · F"
+                    "Following [F]"
                 } else {
-                    "Paused · F"
+                    "Paused [F]"
                 },
                 Action::Follow,
                 theme,
@@ -990,7 +1001,7 @@ impl Ui {
             self.border_button(
                 frame,
                 Rect::new(area.right() - 12, area.y, 10, 1),
-                "Clear C",
+                "Clear [C]",
                 Action::ClearLogs,
                 theme,
             );
@@ -1014,9 +1025,9 @@ impl Ui {
                 frame,
                 Rect::new(inner.x, inner.bottom() - 1, 10, 1),
                 if query.is_empty() {
-                    "Find /"
+                    "Find [/]"
                 } else {
-                    "Clear x"
+                    "Clear [x]"
                 },
                 if query.is_empty() {
                     Action::Search
@@ -1090,7 +1101,7 @@ impl Ui {
                 if query.is_empty() {
                     "Ready. Wallet actions and connection events appear here."
                 } else {
-                    "No matching logs. Press x to clear the filter."
+                    "No matching logs. Press [x] to clear the filter."
                 },
                 Style::default().fg(theme.muted),
             ))]
@@ -1125,16 +1136,11 @@ impl Ui {
             )),
             Rect::new(area.x, area.y, area.width, 1),
         );
-        let footer = Line::from(vec![
-            Span::styled("  Tab", Style::default().fg(theme.accent)),
-            Span::raw(" focus   ←/→ views   "),
-            Span::styled("hjkl/↑↓", Style::default().fg(theme.accent)),
-            Span::raw(" move   "),
-            Span::styled("Enter", Style::default().fg(theme.accent)),
-            Span::raw(" select   "),
-            Span::styled("z", Style::default().fg(theme.accent)),
-            Span::raw(" overview"),
-        ]);
+        let footer = Line::from(if area.width < 110 {
+            "[←/→] Views · [hjkl] Move · [Tab] Focus"
+        } else {
+            "[Tab] Focus · [←/→] Views · [hjkl] Move · [Enter] Select · [z] Overview"
+        });
         frame.render_widget(
             Paragraph::new(footer).style(Style::default().fg(theme.muted)),
             Rect::new(area.x, area.y + 2, area.width.saturating_sub(24), 1),
@@ -1143,7 +1149,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(area.right() - 23, area.y + 2, 10, 1),
-                "q Quit",
+                "Quit [q]",
                 Action::Quit,
                 theme,
                 false,
@@ -1153,7 +1159,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(area.right() - 12, area.y + 2, 11, 1),
-                "? Help",
+                "Help [?]",
                 Action::Help,
                 theme,
                 false,
@@ -1202,7 +1208,7 @@ impl Ui {
             .title(format!(" {title} "))
             .title_top(
                 Line::from(Span::styled(
-                    " Esc × ",
+                    " [Esc] × ",
                     Style::default().fg(theme.muted).bg(theme.panel),
                 ))
                 .right_aligned(),
@@ -1211,7 +1217,7 @@ impl Ui {
             .style(Style::default().bg(theme.panel).fg(theme.text));
         let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
         frame.render_widget(block, area);
-        self.target(Rect::new(area.right() - 8, area.y, 7, 1), Action::Close);
+        self.target(Rect::new(area.right() - 10, area.y, 9, 1), Action::Close);
         match modal {
             Modal::Appearance { kind, selected } => {
                 for (index, (id, label)) in kind.choices().iter().enumerate() {
@@ -1238,9 +1244,13 @@ impl Ui {
                         index == *selected,
                     );
                 }
-                frame.render_widget(Paragraph::new("↑/↓ or j/k to choose · Enter to apply\nClick an option to apply · Esc to cancel")
+                frame.render_widget(
+                    Paragraph::new(
+                        "[↑]/[↓] or [j]/[k] · [Enter] applies\nClick to apply · [Esc] cancels",
+                    )
                     .style(Style::default().fg(theme.muted)),
-                    Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 2));
+                    Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 2),
+                );
             }
             Modal::Funding { selected, reason } => {
                 if let Some(wallet) = app.wallet() {
@@ -1256,14 +1266,14 @@ impl Ui {
                 }
                 for (index, (label, action)) in [
                     (
-                        "1  Solana faucet · address prefilled",
+                        "[1] Solana faucet · address prefilled",
                         Action::BrowserFaucet(crate::funding::Faucet::Solana),
                     ),
                     (
-                        "2  Quicknode faucet · copy address",
+                        "[2] Quicknode faucet · copy address",
                         Action::BrowserFaucet(crate::funding::Faucet::Quicknode),
                     ),
-                    ("3  Request through current RPC", Action::RpcAirdrop),
+                    ("[3] Request through current RPC", Action::RpcAirdrop),
                 ]
                 .into_iter()
                 .enumerate()
@@ -1278,7 +1288,7 @@ impl Ui {
                     );
                 }
                 let message = reason.as_ref().map(|reason| format!("RPC request failed: {}\nUse a web faucet, or check your balance before retrying an uncertain request.", clean_text(reason)))
-                    .unwrap_or_else(|| "Web faucets have their own limits and verification. Finish the request in your browser; Solte watches for the funds.\n↑/↓ or j/k selects · Enter opens · Esc cancels".into());
+                    .unwrap_or_else(|| "Web faucets have their own limits and verification. Finish the request in your browser; Solte watches for the funds.\n[↑]/[↓] or [j]/[k] selects · [Enter] opens · [Esc] cancels".into());
                 frame.render_widget(
                     Paragraph::new(message)
                         .wrap(Wrap { trim: false })
@@ -1400,7 +1410,7 @@ impl Ui {
             Modal::Profiles { selected } => {
                 frame.render_widget(
                     Paragraph::new(format!(
-                        "Profile {} / {} · j/k or wheel to choose",
+                        "Profile {} / {} · [j]/[k] or wheel to choose",
                         selected + 1,
                         app.config.profiles.len()
                     ))
@@ -1446,7 +1456,7 @@ impl Ui {
                         24.min(inner.width),
                         1,
                     ),
-                    "+ Add custom profile a",
+                    "Add profile [a]",
                     Action::AddProfile,
                     theme,
                     false,
@@ -1466,13 +1476,13 @@ impl Ui {
                         .first()
                         .is_some_and(|line| line.starts_with("Signature  "))
                 {
-                    lines[0] = format!("Signature  {} · copy y", short(signature));
+                    lines[0] = format!("Signature  {} · copy [y]", short(signature));
                 }
                 self.inspection_body(frame, inner, lines, *scroll, theme);
                 self.button(
                     frame,
                     Rect::new(inner.x, inner.bottom() - 1, 19, 1),
-                    "Open explorer o",
+                    "Explorer [o]",
                     Action::ExplorerTransaction,
                     theme,
                     false,
@@ -1485,7 +1495,7 @@ impl Ui {
                         20.min(inner.width.saturating_sub(21)),
                         1,
                     ),
-                    "Copy signature y",
+                    "Copy signature [y]",
                     Action::CopySignature,
                     theme,
                     false,
@@ -1521,7 +1531,7 @@ impl Ui {
                     self.button(
                         frame,
                         Rect::new(inner.x, inner.bottom() - 1, 26.min(inner.width), 1),
-                        "Sign & submit  Enter",
+                        "Sign & submit [Enter]",
                         Action::Submit,
                         theme,
                         false,
@@ -1531,50 +1541,52 @@ impl Ui {
             Modal::Help { scroll } => {
                 let lines = [
                     "NAVIGATION",
-                    "Tab / Shift-Tab       Focus regions in this view",
-                    "1–5                   Overview / Wallets / Transactions / Network / Logs",
-                    "Left / Right          Previous / next main view (outside dialogs)",
-                    "h j k l / Up / Down    Navigate inside the focused panel",
-                    "k at the top          Focus the main panel selector",
-                    "h/l in selector       Switch view; j/Enter enters it",
-                    "Enter                 Activate the highlighted control",
-                    "z                     Open focused summary / return to Overview",
+                    "[Tab]/[Shift-Tab]  Move focus within this view",
+                    "[1] Overview   [2] Wallets   [3] Transactions",
+                    "[4] Network    [5] Logs",
+                    "[←]/[→]  Switch main views outside dialogs",
+                    "[h][j][k][l] or [↑]/[↓]  Navigate inside a pane",
+                    "[k] at the top focuses the main tab bar",
+                    "[h]/[l] on the tab bar switches views",
+                    "[j] or [Enter] enters the selected view",
+                    "[Enter]  Activate the highlighted control",
+                    "[z]  Visit focused summary / return to Overview",
                     "",
-                    "WALLET",
-                    "n  New keypair         i  Import keypair",
-                    "]  Cycle identity     y  Copy selected wallet address",
-                    "f  Request funding    s  Simulate and review a SOL transfer",
-                    "p  RPC profiles       r/R  Refresh RPC and wallet state",
+                    "WALLETS AND NETWORK",
+                    "[n] New wallet   [i] Import   []] Cycle wallet",
+                    "[y] Copy wallet address",
+                    "[f] Funding options   [s] Review and send SOL",
+                    "[p] RPC profiles      [r]/[R] Refresh state",
                     "Refresh shows progress, then success or failure.",
                     "Offline refresh reloads cached history only.",
                     "",
-                    "HISTORY",
-                    "/  Search Transactions or Logs; x clears its search",
-                    "e  Open Transactions and toggle failures only",
-                    "b  Fetch older        o  Open selected transaction in explorer",
-                    "F  Follow logs        C  Clear visible session log",
+                    "TRANSACTIONS AND LOGS",
+                    "[/] Search this view   [x] Clear its search",
+                    "[e] Open Transactions and toggle failures only",
+                    "[b] Load older history   [o] Transaction explorer",
+                    "[F] Follow/pause logs    [C] Clear visible logs",
                     "",
                     "APPEARANCE",
-                    "t  Choose theme       m  Choose motion",
-                    "",
-                    "MOUSE",
-                    "Click panel headings to focus, wallets to select, and",
-                    "transaction rows to inspect. Buttons and form fields",
-                    "are clickable. Use the wheel to scroll lists or logs.",
+                    "[t] Choose theme   [m] Choose motion",
                     "",
                     "DIALOGS AND FORMS",
-                    "In text fields, type normally; left/right moves the cursor.",
-                    "Tab/Shift-Tab changes fields or menu choices.",
-                    "j/k or Up/Down selects menu choices; Enter applies.",
-                    "Enter submits forms. Esc cancels and preserves the page.",
-                    "Inspectors: j/k, Page Up/Down, Home/End scroll details.",
-                    "Inspector y copies the signature; o opens its explorer.",
-                    "q closes menus/help; outside a dialog it quits Solte.",
-                    "F and C are uppercase. Other letter shortcuts are lowercase",
-                    "unless an uppercase alternative is shown.",
-                    "Ctrl-C exits everywhere.",
-                    "Public Devnet history can be incomplete. Solte preserves",
-                    "records it captured; it cannot recover pruned records.",
+                    "Type normally in fields; [←]/[→] moves the cursor.",
+                    "[Tab]/[Shift-Tab] changes fields or menu choices.",
+                    "[j]/[k] or [↑]/[↓] selects menu choices.",
+                    "[Enter] applies a choice or submits a form.",
+                    "[Esc] cancels without changing the page.",
+                    "Inspectors: [j]/[k], [PageUp]/[PageDown], [Home]/[End]",
+                    "Inspector [y] copies the signature; [o] opens Explorer.",
+                    "[q] closes menus/help or quits from the workspace.",
+                    "[Ctrl-C] exits everywhere. [F] and [C] are uppercase.",
+                    "",
+                    "MOUSE",
+                    "Click tabs to switch views and panel headings to focus.",
+                    "Click wallet or transaction rows to select or inspect.",
+                    "Buttons and fields are clickable; the wheel scrolls.",
+                    "",
+                    "Public Devnet history may be incomplete. Solte retains",
+                    "captured records; it cannot recover pruned records.",
                 ];
                 self.inspection_body(
                     frame,
@@ -1621,7 +1633,7 @@ impl Ui {
         frame.render_widget(paragraph.scroll((offset, 0)), content);
         frame.render_widget(
             Paragraph::new(format!(
-                "{}–{} / {} · Home/End",
+                "{}–{} / {} · [Home]/[End]",
                 usize::from(offset) + 1,
                 (usize::from(offset) + content.height as usize).min(total),
                 total
@@ -1754,6 +1766,50 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn shortcut_hints_remain_bracketed_and_visible_at_every_layout_size() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        for (width, height) in [(60, 10), (80, 10), (90, 22), (140, 42)] {
+            for view in View::ALL {
+                app.switch_view(view);
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                for hit in &ui.hits {
+                    let expected = match hit.action {
+                        Action::New => "[n]",
+                        Action::Import => "[i]",
+                        Action::Fund => "[f]",
+                        Action::Send => "[s]",
+                        Action::CopyAddress => "[y]",
+                        Action::Profiles => "[p]",
+                        Action::Theme => "[t]",
+                        Action::Motion => "[m]",
+                        Action::Search => "[/]",
+                        Action::Failures => "[e]",
+                        Action::Older => "[b]",
+                        Action::Refresh => "[r]",
+                        Action::Follow => "[F]",
+                        Action::ClearLogs => "[C]",
+                        Action::Help => "[?]",
+                        Action::Quit => "[q]",
+                        _ => continue,
+                    };
+                    let text: String = (hit.area.y..hit.area.bottom())
+                        .flat_map(|y| (hit.area.x..hit.area.right()).map(move |x| (x, y)))
+                        .map(|pos| terminal.backend().buffer()[pos].symbol())
+                        .collect();
+                    assert!(
+                        text.contains(expected),
+                        "{view:?} {width}x{height}: {:?} rendered {text:?}",
+                        hit.action
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1940,7 +1996,7 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(text.contains("copy y"));
+        assert!(text.contains("copy [y]"));
         assert!(text.contains("Slot"));
         assert!(text.contains("Error"));
         assert!(app.modal_scroll_limit > 0);
@@ -2104,7 +2160,7 @@ mod tests {
                 .find(|hit| hit.action == Action::Close)
                 .unwrap()
                 .area;
-            for (offset, character) in " Esc × ".chars().enumerate() {
+            for (offset, character) in " [Esc] × ".chars().enumerate() {
                 assert_eq!(
                     terminal.backend().buffer()[(close.x + offset as u16, close.y)].symbol(),
                     character.to_string()

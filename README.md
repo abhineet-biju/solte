@@ -138,3 +138,5 @@ Manual refresh displays a spinner while pending and a success check or failure i
 Appearance includes Ember, Glacier, Orchid, and Neon. Neon uses a navy background, cyan headings, magenta focus, and mint balances. Choose it with `t` or launch with `solte --theme neon`. Theme selection changes colors only.
 
 Terminal font zoom is handled as a change in available character columns and rows. Layouts reflow at their breakpoints, preserve view/selection state, and rebuild click targets. Below 60 × 10, Solte shows a size hint and recovers when enlarged; it cannot fit the complete interface below that minimum.
+
+Shortcut hints use square brackets consistently, including tab numbers, buttons, dialog close labels, status messages, and Help. The header uses a three-line block wordmark when space permits and a compact spaced wordmark in shorter windows; both use the terminal’s existing font.

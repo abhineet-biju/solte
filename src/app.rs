@@ -455,10 +455,10 @@ impl App {
                 if success {
                     "Refreshed ✓".into()
                 } else {
-                    "Failed ! r".into()
+                    "Failed [r]".into()
                 }
             }
-            _ => "Refresh r".into(),
+            _ => "Refresh [r]".into(),
         }
     }
 
@@ -765,7 +765,7 @@ impl App {
                 self.pane = Pane::Wallet;
                 self.status = if self.failures_only {
                     format!(
-                        "Errors filter on · {} matching failed transactions · e shows all",
+                        "Errors filter on · {} matching failed transactions · [e] shows all",
                         self.visible_records().len()
                     )
                 } else {
@@ -820,13 +820,13 @@ mod tests {
         app.finish_refresh(Ok(()));
         assert_eq!(app.status, "Cached history reloaded");
         app.finish_refresh(Err("RPC unreachable".into()));
-        assert_eq!(app.refresh_label(), "Failed ! r");
+        assert_eq!(app.refresh_label(), "Failed [r]");
         assert!(app.status.contains("RPC unreachable"));
         app.refresh = RefreshState::Finished {
             at: Instant::now() - std::time::Duration::from_secs(5),
             success: true,
         };
-        assert_eq!(app.refresh_label(), "Refresh r");
+        assert_eq!(app.refresh_label(), "Refresh [r]");
     }
 
     #[test]
