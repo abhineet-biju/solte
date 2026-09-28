@@ -380,6 +380,7 @@ pub struct App {
     pub log_scroll: usize,
     pub log_filter: String,
     pub follow: bool,
+    paused_logs: Option<VecDeque<LogEntry>>,
     pub network: Option<NetworkState>,
     pub network_scroll: u16,
     pub balance: Option<u64>,
@@ -424,6 +425,7 @@ impl App {
             log_scroll: 0,
             log_filter: String::new(),
             follow: true,
+            paused_logs: None,
             network: None,
             network_scroll: 0,
             balance: None,
@@ -533,15 +535,37 @@ impl App {
     pub fn log(&mut self, level: &str, message: impl Into<String>) {
         self.push_log(LogEntry::new(level, message));
     }
+    pub fn log_entries(&self) -> &VecDeque<LogEntry> {
+        self.paused_logs.as_ref().unwrap_or(&self.logs)
+    }
+
+    pub fn resume_logs(&mut self) {
+        self.follow = true;
+        self.paused_logs = None;
+        self.log_scroll = 0;
+    }
+
+    fn pause_logs(&mut self) {
+        if self.follow {
+            self.paused_logs = Some(self.logs.clone());
+        }
+        self.follow = false;
+    }
+
     pub fn push_log(&mut self, entry: LogEntry) {
-        if self
-            .logs
-            .back()
-            .is_some_and(|last| last.message == entry.message && last.level == entry.level)
-        {
+        if self.logs.iter().any(|existing| {
+            existing.timestamp == entry.timestamp
+                && existing.message == entry.message
+                && existing.level == entry.level
+        }) {
             return;
         }
-        self.logs.push_back(entry);
+        let index = self
+            .logs
+            .iter()
+            .position(|existing| existing.timestamp > entry.timestamp)
+            .unwrap_or(self.logs.len());
+        self.logs.insert(index, entry);
         while self.logs.len() > 1000 {
             self.logs.pop_front();
         }
@@ -694,8 +718,8 @@ impl App {
                     self.focused_control = Some(Action::SelectTransaction(self.transaction_cursor));
                 }
                 Pane::Logs => {
-                    self.follow = false;
-                    self.log_scroll = move_index(self.log_scroll, -delta, self.logs.len());
+                    self.pause_logs();
+                    self.log_scroll = move_index(self.log_scroll, -delta, self.log_entries().len());
                 }
                 Pane::Network => {
                     self.network_scroll =
@@ -735,7 +759,11 @@ impl App {
                 self.pane = Pane::Wallet;
             }
             Action::Follow => {
-                self.follow = !self.follow;
+                if self.follow {
+                    self.pause_logs();
+                } else {
+                    self.resume_logs();
+                }
                 self.log_scroll = 0;
                 self.status = if self.follow {
                     "Following live logs"
@@ -746,6 +774,9 @@ impl App {
             }
             Action::ClearLogs => {
                 self.logs.clear();
+                if let Some(entries) = &mut self.paused_logs {
+                    entries.clear();
+                }
                 self.log_scroll = 0;
                 self.status = "Visible session log cleared".into();
             }
@@ -805,6 +836,35 @@ fn move_index(index: usize, delta: i32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_logs_are_chronological_and_pause_freezes_visible_entries() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        for timestamp in [20, 5, 10] {
+            app.push_log(LogEntry {
+                timestamp,
+                level: "INFO".into(),
+                message: timestamp.to_string(),
+            });
+        }
+        assert_eq!(
+            app.log_entries()
+                .iter()
+                .map(|entry| entry.timestamp)
+                .collect::<Vec<_>>(),
+            vec![5, 10, 20]
+        );
+        app.navigate(&Action::Follow);
+        app.push_log(LogEntry {
+            timestamp: 30,
+            level: "INFO".into(),
+            message: "new".into(),
+        });
+        assert_eq!(app.log_entries().back().unwrap().timestamp, 20);
+        assert_eq!(app.logs.back().unwrap().timestamp, 30);
+        app.navigate(&Action::Follow);
+        assert_eq!(app.log_entries().back().unwrap().timestamp, 30);
+    }
 
     #[test]
     fn refresh_feedback_covers_pending_completion_error_and_reduced_motion() {

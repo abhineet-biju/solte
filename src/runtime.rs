@@ -48,6 +48,7 @@ impl Services {
         if app.session > 0 {
             app.logs.clear();
         }
+        app.resume_logs();
         app.session += 1;
         app.records.clear();
         app.history_loading = false;

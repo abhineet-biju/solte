@@ -118,7 +118,8 @@ def main():
                 wait_for(lambda: balance(recipient) == 100_000_000)
                 drain(3)
                 send(b"r", 2)
-                send(b"\x1b[<0;32;21M", 1)
+                send(b"3")
+                send(b"\x1b[<0;10;13M", 1)
                 assert b"Transaction inspector" in output
                 send(b"\x1b")
             else:

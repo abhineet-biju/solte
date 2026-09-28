@@ -123,19 +123,14 @@ impl Ui {
         action: Action,
         theme: Theme,
     ) {
-        let padding = area
-            .width
-            .saturating_sub(label.len() as u16 + key.len() as u16 + 2);
-        let line = Line::from(vec![
-            Span::styled(label, Style::default().fg(theme.text)),
-            Span::raw(" ".repeat(padding as usize)),
-            Span::styled(format!("[{key}]"), Style::default().fg(theme.muted)),
-        ]);
-        frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(theme.panel)),
+        self.button(
+            frame,
             area,
+            &format!("{label} [{key}]"),
+            action,
+            theme,
+            false,
         );
-        self.target(area, action);
     }
 
     fn border_button(
@@ -146,12 +141,7 @@ impl Ui {
         action: Action,
         theme: Theme,
     ) {
-        frame.render_widget(
-            Paragraph::new(format!(" {text} "))
-                .style(Style::default().fg(theme.muted).bg(theme.panel)),
-            area,
-        );
-        self.target(area, action);
+        self.button(frame, area, text, action, theme, false);
     }
 
     fn welcome(&mut self, frame: &mut Frame, area: Rect, theme: Theme) {
@@ -470,13 +460,13 @@ impl Ui {
             theme,
             false,
         );
-        frame.render_widget(
-            Paragraph::new("Cycle identity []]").style(Style::default().fg(theme.muted)),
+        self.button(
+            frame,
             Rect::new(regions[1].x, regions[1].y + 4, regions[1].width, 1),
-        );
-        self.target(
-            Rect::new(regions[1].x, regions[1].y + 4, regions[1].width, 1),
+            "Cycle identity []]",
             Action::NextWallet,
+            theme,
+            false,
         );
     }
 
@@ -537,24 +527,27 @@ impl Ui {
             );
             return;
         }
-        if app.view == View::Overview && body.height >= 18 {
+        if app.view == View::Overview && body.height >= 18 && body.width >= 40 {
             frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(short(&wallet.address), Style::default().fg(theme.muted)),
-                    Span::styled("  Copy [y]  Explorer", Style::default().fg(theme.green)),
-                ])),
-                Rect::new(body.x, body.y, body.width, 1),
+                Paragraph::new(short(&wallet.address)).style(Style::default().fg(theme.muted)),
+                Rect::new(body.x, body.y, 16, 1),
             );
-            self.target(
-                Rect::new(body.x, body.y, body.width.min(25), 1),
+            self.button(
+                frame,
+                Rect::new(body.x + 18, body.y, 10, 1),
+                "Copy [y]",
                 Action::CopyAddress,
+                theme,
+                false,
             );
-            if body.width > 26 {
-                self.target(
-                    Rect::new(body.x + 26, body.y, body.width - 26, 1),
-                    Action::ExplorerWallet,
-                );
-            }
+            self.button(
+                frame,
+                Rect::new(body.x + 30, body.y, 10, 1),
+                "Explorer",
+                Action::ExplorerWallet,
+                theme,
+                false,
+            );
             frame.render_widget(
                 Paragraph::new("AVAILABLE BALANCE").style(Style::default().fg(theme.muted)),
                 Rect::new(body.x, body.y + 2, body.width, 1),
@@ -1020,7 +1013,7 @@ impl Ui {
             String::new()
         };
         let entries: Vec<_> = app
-            .logs
+            .log_entries()
             .iter()
             .filter(|entry| {
                 query.is_empty()
@@ -1214,13 +1207,7 @@ impl Ui {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(format!(" {title} "))
-            .title_top(
-                Line::from(Span::styled(
-                    " [Esc] × ",
-                    Style::default().fg(theme.muted).bg(theme.panel),
-                ))
-                .right_aligned(),
-            )
+            .title_top(Line::from(Span::styled(" [Esc] × ", theme.control())).right_aligned())
             .border_style(Style::default().fg(theme.accent))
             .style(Style::default().bg(theme.panel).fg(theme.text));
         let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
@@ -1774,6 +1761,38 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn action_buttons_share_one_shortcut_style_across_themes() {
+        for name in ["ember", "glacier", "orchid", "neon"] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            crate::demo::populate(&mut app);
+            app.config.theme = name.into();
+            app.selector_focus = true;
+            let theme = Theme::named(name);
+            let mut ui = Ui::default();
+            let mut terminal = Terminal::new(TestBackend::new(140, 42)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            for action in [
+                Action::New,
+                Action::Import,
+                Action::Profiles,
+                Action::Refresh,
+                Action::Follow,
+                Action::ClearLogs,
+                Action::CopyAddress,
+                Action::ExplorerWallet,
+            ] {
+                for hit in ui.hits.iter().filter(|hit| hit.action == action) {
+                    for x in hit.area.x..hit.area.right() {
+                        let cell = &terminal.backend().buffer()[(x, hit.area.y)];
+                        assert_eq!(cell.bg, theme.selected, "{name} {action:?}");
+                        assert_eq!(cell.fg, theme.text, "{name} {action:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
