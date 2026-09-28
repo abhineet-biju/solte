@@ -135,10 +135,10 @@ impl Ui {
             Block::default().style(Style::default().bg(theme.bg).fg(theme.text)),
             area,
         );
-        if area.width < 48 || area.height < 14 {
+        if area.width < 80 || area.height < 24 {
             frame.render_widget(
                 Paragraph::new(
-                    "SOLTE\n\nEnlarge the terminal to at least 48 × 14.\nPress q to quit.",
+                    "SOLTE\n\nEnlarge the terminal to at least 80 × 24.\nPress q to quit.",
                 )
                 .style(Style::default().fg(theme.accent)),
                 area,
@@ -152,7 +152,7 @@ impl Ui {
         ])
         .split(area);
         self.header(frame, app, outer[0], theme);
-        if app.zoomed || area.width < 100 || area.height < 28 {
+        if app.zoomed || area.width < 100 || area.height < 34 {
             self.draw_pane(frame, app, outer[1], app.pane, theme);
         } else {
             let body = Layout::vertical([
@@ -436,7 +436,7 @@ impl Ui {
             }
             return;
         };
-        if app.tab == Tab::Overview && body.height >= 13 {
+        if app.tab == Tab::Overview && body.height >= 18 {
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(short(&wallet.address), Style::default().fg(theme.muted)),
@@ -512,6 +512,43 @@ impl Ui {
                 frame,
                 app,
                 Rect::new(body.x, body.y + 9, body.width, body.height - 9),
+                theme,
+            );
+        } else if app.tab == Tab::Overview && body.height >= 10 {
+            let balance = app.balance.map(format_sol).unwrap_or_else(|| "—".into());
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{balance} SOL   ·   {}   ·   {}",
+                    app.profile().name,
+                    short(&wallet.address)
+                ))
+                .style(Style::default().fg(theme.green)),
+                Rect::new(body.x, body.y, body.width, 1),
+            );
+            self.target(
+                Rect::new(body.x, body.y, body.width, 1),
+                Action::CopyAddress,
+            );
+            self.button(
+                frame,
+                Rect::new(body.x, body.y + 2, 16, 1),
+                "↓ Fund wallet f",
+                Action::Fund,
+                theme,
+                false,
+            );
+            self.button(
+                frame,
+                Rect::new(body.x + 18, body.y + 2, 14, 1),
+                "↑ Send SOL s",
+                Action::Send,
+                theme,
+                false,
+            );
+            self.transactions(
+                frame,
+                app,
+                Rect::new(body.x, body.y + 4, body.width, body.height - 4),
                 theme,
             );
         } else {
@@ -941,10 +978,8 @@ impl Ui {
             Span::raw(" move   "),
             Span::styled("Enter", Style::default().fg(theme.accent)),
             Span::raw(" select   "),
-            Span::styled("?", Style::default().fg(theme.accent)),
-            Span::raw(" help   "),
-            Span::styled("q", Style::default().fg(theme.accent)),
-            Span::raw(" quit"),
+            Span::styled("z", Style::default().fg(theme.accent)),
+            Span::raw(" zoom"),
         ]);
         frame.render_widget(
             Paragraph::new(footer).style(Style::default().fg(theme.muted)),
@@ -1417,7 +1452,7 @@ mod tests {
 
     #[test]
     fn layouts_render_at_supported_sizes_and_expose_mouse_actions() {
-        for (width, height) in [(160, 48), (110, 32), (80, 24), (48, 14)] {
+        for (width, height) in [(160, 48), (110, 32), (80, 24)] {
             let app = App::new("/test/project".into(), Config::default(), vec![]);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let mut ui = Ui::default();
@@ -1449,7 +1484,7 @@ mod tests {
 
     #[test]
     fn every_panel_and_form_remains_clickable_in_compact_windows() {
-        for (width, height) in [(48, 14), (80, 22), (100, 28), (160, 48)] {
+        for (width, height) in [(80, 24), (100, 28), (160, 48)] {
             let mut app = App::new("/test/project".into(), Config::default(), vec![]);
             crate::demo::populate(&mut app);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -1457,6 +1492,16 @@ mod tests {
             for pane in Pane::ALL {
                 app.pane = pane;
                 terminal.draw(|f| ui.draw(f, &app)).unwrap();
+                if pane == Pane::Wallet {
+                    assert!(
+                        ui.hits
+                            .iter()
+                            .any(|hit| matches!(hit.action, Action::SelectTransaction(_))),
+                        "Transactions must remain clickable at {width}x{height}"
+                    );
+                    assert!(ui.hits.iter().any(|hit| hit.action == Action::Fund));
+                    assert!(ui.hits.iter().any(|hit| hit.action == Action::Send));
+                }
                 assert!(
                     ui.hits
                         .iter()
