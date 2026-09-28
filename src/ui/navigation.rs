@@ -35,6 +35,9 @@ impl Ui {
             Pane::Wallets => Action::New,
             Pane::Wallet => Action::Fund,
             Pane::Network => Action::Profiles,
+            Pane::Logs if !app.visible_logs().is_empty() => {
+                Action::SelectLog(app.log_scroll.min(app.visible_logs().len() - 1))
+            }
             Pane::Logs => Action::Follow,
         };
         controls
@@ -114,6 +117,13 @@ impl Ui {
             _ => 0,
         };
         if delta != 0 {
+            if let Action::SelectLog(index) = current {
+                let next = index as i64 + delta;
+                if (0..app.visible_logs().len() as i64).contains(&next) {
+                    app.focus_log(next as usize);
+                    return;
+                }
+            }
             let list = match current {
                 Action::SelectWallet(index) => Some((index, app.wallets.len(), true)),
                 Action::SelectTransaction(index) => {
@@ -158,6 +168,7 @@ impl Ui {
 
     fn focus(app: &mut App, action: Action) {
         match action {
+            Action::SelectLog(index) => app.focus_log(index),
             Action::SelectWallet(index) => app.wallet_cursor = index,
             Action::SelectTransaction(index) => app.transaction_cursor = index,
             _ => {}

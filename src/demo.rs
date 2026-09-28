@@ -46,6 +46,10 @@ pub fn populate(app: &mut App) {
         let error = failed.then(|| "InstructionError: insufficient funds (0x1)".into());
         TransactionRecord { signature, slot: 415_239_880 - i * 320, timestamp: Some(now() as i64 - 30 - i as i64 * 180), error, details: Some(json!({"transaction":{"message":{"accountKeys":[{"pubkey":owner}],"instructions":[{"program":"system","parsed":{"type":if i % 2 == 0 {"transfer"}else{"createAccount"},"info":{"lamports":500000000}}}]}},"meta":{"fee":5000,"computeUnitsConsumed":450,"err":if failed{json!({"InstructionError":[0,"InsufficientFunds"]})}else{json!(null)},"preBalances":[12000000000u64],"postBalances":[if failed {11999995000u64} else if i%2==0 {11499995000u64}else{14000000000u64}],"logMessages":["Program 11111111111111111111111111111111 invoke [1]",if failed {"Transfer: insufficient lamports"}else{"Program log: transfer"},if failed {"Program failed: custom program error: 0x1"}else{"Program 11111111111111111111111111111111 success"}],"innerInstructions":[],"preTokenBalances":[],"postTokenBalances":[]}})) }
     }).collect();
+    app.push_log(LogEntry::new(
+        "INFO",
+        format!("Confirmed {}", app.records[0].signature),
+    ));
     for (level, message) in [
         ("INFO", "Project loaded · 4 development identities"),
         ("INFO", "Devnet RPC connected · wallet logs subscribed"),

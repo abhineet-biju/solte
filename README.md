@@ -42,6 +42,12 @@ Solte discovers the nearest project through `.solte/config.toml`, `Anchor.toml`,
 
 Create a wallet with `n` or **New identity**. New keys use standard Solana JSON in `.solte/keys/`; existing names are never overwritten. Imported keys stay at their original paths. Both remain usable with Anchor and the Solana CLI.
 
+In **Wallets**, moving the selection previews an identity; clicking it or pressing Enter opens its details at any supported terminal size. Use **Copy address [y]** without changing the active wallet. **Use wallet [Enter]** explicitly activates the inspected identity. The `y` shortcut in the Wallets view also copies the highlighted identity directly. Overview wallet shortcuts and `]` still provide quick activation.
+
+Transaction colors describe the selected wallet's SOL balance change: **Received** is green, **Sent** is red, and failed transactions are red with a failure marker. Fee-only and other program activity use the theme's heading color. The inspector retains the underlying instruction details. Search accepts both instruction names and the displayed action labels.
+
+Logs use red for errors, the theme accent for warnings, neutral text for informational entries, and muted text for debug/trace. The Logs view shows separate entries, newest first. Navigate with `j`/`k`, arrows, Page Up/Down, or the mouse wheel; click an entry or press Enter for its full text. Inspecting or navigating logs pauses following to keep the selection stable; `F` resumes at the newest entry. Log details offer **Copy log [y]** and, when a full transaction signature is present, **Signature [s]** and **Explorer [o]**. If a message contains several signatures, those actions use the first valid signature; copying the full log preserves them all.
+
 On Devnet, `f` opens a funding menu: the official Solana faucet with your public address prefilled, Quicknode with address copying, or a direct request through the current RPC. Web requests require you to complete the faucet's verification in your browser. Solte refreshes on terminal focus and continues monitoring your balance. A rejected direct Devnet request offers the browser choices again. Localnet uses direct RPC funding.
 
 Use `s` to enter a recipient and amount, inspect an unsigned simulation, then explicitly sign and submit. The review shows the network, amount, fee, compute usage, and available program logs. A failed simulation cannot be submitted. When confirmation is uncertain, Solte keeps the signature so you can check it before retrying.
@@ -129,7 +135,7 @@ The source is organized around wallet operations, network monitoring, local stor
 
 Transaction inspectors support Home/End and bounded scrolling with a position indicator. Escape closes a dialog without changing the underlying view. In offline mode, funding and sending explain their unavailability before opening a form.
 
-Interaction styling is shared across all themes: a solid accent background marks the focused control or editable field; muted backgrounds and accent text indicate selection without focus. Wallet activity, errors, and connection health retain explicit symbols or labels. Moving focus never changes the active wallet until it is activated. Dialogs own focus while open, and closing them restores the underlying view and focus. In forms, the highlighted field receives typing; Enter submits the form.
+Interaction styling is shared across all themes: a solid accent background marks the focused control or editable field; muted backgrounds and accent text indicate selection without focus. Wallet activity, errors, and connection health retain explicit symbols or labels. Moving focus never changes the active wallet. In Wallets, opening details also preserves the active wallet until Use wallet is confirmed. Dialogs own focus while open, and closing them restores the underlying view and focus. In forms, the highlighted field receives typing; Enter submits the form.
 
 Overview retains all four summaries from 80 columns by 20 rows, keeping Wallets on the left and Network on the right. Narrower sidebars and wrapped wallet actions preserve the same arrangement when zooming. Smaller windows prioritize a usable summary and keep every full view accessible. Transactions is abbreviated to Txns in the narrowest tab bar; `--view transactions` also accepts the previous `activity` spelling.
 

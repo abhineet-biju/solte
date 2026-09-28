@@ -114,6 +114,10 @@ pub enum Action {
     Move(i32),
     Activate,
     SelectWallet(usize),
+    ActivateWallet(usize),
+    CopyWallet(usize),
+    SelectLog(usize),
+    CopyLog,
     SelectTransaction(usize),
     New,
     Import,
@@ -321,6 +325,14 @@ impl Appearance {
 }
 
 pub enum Modal {
+    Log {
+        entry: LogEntry,
+        scroll: u16,
+    },
+    Wallet {
+        index: usize,
+        scroll: u16,
+    },
     Appearance {
         kind: Appearance,
         selected: usize,
@@ -523,6 +535,13 @@ impl App {
                     && (filter.is_empty()
                         || r.signature.to_lowercase().contains(&filter)
                         || r.kind().to_lowercase().contains(&filter)
+                        || r.activity(
+                            self.wallet()
+                                .map(|w| w.address.as_str())
+                                .unwrap_or_default(),
+                        )
+                        .to_lowercase()
+                        .contains(&filter)
                         || r.error
                             .as_ref()
                             .is_some_and(|e| e.to_lowercase().contains(&filter)))
@@ -539,10 +558,36 @@ impl App {
         self.paused_logs.as_ref().unwrap_or(&self.logs)
     }
 
+    pub fn visible_logs(&self) -> Vec<&LogEntry> {
+        let query = if self.view == View::Logs {
+            self.log_filter.to_lowercase()
+        } else {
+            String::new()
+        };
+        self.log_entries()
+            .iter()
+            .rev()
+            .filter(|entry| {
+                query.is_empty()
+                    || entry.message.to_lowercase().contains(&query)
+                    || entry.level.to_lowercase().contains(&query)
+            })
+            .collect()
+    }
+
+    pub fn focus_log(&mut self, index: usize) {
+        self.pause_logs();
+        self.log_scroll = index.min(self.visible_logs().len().saturating_sub(1));
+        self.focused_control = Some(Action::SelectLog(self.log_scroll));
+    }
+
     pub fn resume_logs(&mut self) {
         self.follow = true;
         self.paused_logs = None;
         self.log_scroll = 0;
+        if matches!(self.focused_control, Some(Action::SelectLog(_))) {
+            self.focused_control = Some(Action::SelectLog(0));
+        }
     }
 
     fn pause_logs(&mut self) {
@@ -600,6 +645,25 @@ impl App {
                 return form.key(key);
             }
             return match key.code {
+                KeyCode::Char('y') if matches!(modal, Modal::Log { .. }) => Some(Action::CopyLog),
+                KeyCode::Char('s') if matches!(modal, Modal::Log { entry, .. } if entry.signature().is_some()) => {
+                    Some(Action::CopySignature)
+                }
+                KeyCode::Char('o') if matches!(modal, Modal::Log { entry, .. } if entry.signature().is_some()) => {
+                    Some(Action::ExplorerTransaction)
+                }
+                KeyCode::Char('y') if matches!(modal, Modal::Wallet { .. }) => {
+                    let Modal::Wallet { index, .. } = modal else {
+                        unreachable!()
+                    };
+                    Some(Action::CopyWallet(*index))
+                }
+                KeyCode::Enter if matches!(modal, Modal::Wallet { .. }) => {
+                    let Modal::Wallet { index, .. } = modal else {
+                        unreachable!()
+                    };
+                    Some(Action::ActivateWallet(*index))
+                }
                 KeyCode::Char('y') if matches!(modal, Modal::Funding { .. }) => {
                     Some(Action::CopyAddress)
                 }
@@ -679,6 +743,9 @@ impl App {
             KeyCode::Char('t') => Some(Action::Theme),
             KeyCode::Char('m') => Some(Action::Motion),
             KeyCode::Char('o') => Some(Action::ExplorerTransaction),
+            KeyCode::Char('y') if self.view == View::Wallets => {
+                Some(Action::CopyWallet(self.wallet_cursor))
+            }
             KeyCode::Char('y') => Some(Action::CopyAddress),
             KeyCode::Char('F') => Some(Action::Follow),
             KeyCode::Char('C') => Some(Action::ClearLogs),
@@ -718,8 +785,8 @@ impl App {
                     self.focused_control = Some(Action::SelectTransaction(self.transaction_cursor));
                 }
                 Pane::Logs => {
-                    self.pause_logs();
-                    self.log_scroll = move_index(self.log_scroll, -delta, self.log_entries().len());
+                    let index = move_index(self.log_scroll, delta, self.visible_logs().len());
+                    self.focus_log(index);
                 }
                 Pane::Network => {
                     self.network_scroll =
@@ -740,7 +807,9 @@ impl App {
                     *selected = move_index(*selected, delta, self.config.profiles.len())
                 }
                 Some(
-                    Modal::Inspect { scroll, .. }
+                    Modal::Log { scroll, .. }
+                    | Modal::Wallet { scroll, .. }
+                    | Modal::Inspect { scroll, .. }
                     | Modal::Review { scroll, .. }
                     | Modal::Help { scroll },
                 ) => {

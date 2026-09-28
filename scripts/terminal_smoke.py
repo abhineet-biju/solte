@@ -94,6 +94,17 @@ def main():
             seller = root / ".solte/keys/seller.json"
             wait_for(seller.exists)
             drain(0.5)
+            saved_selection = (root / ".solte/config.toml").read_text()
+            send(b"2jk\r")
+            assert b"Wallet details" in output
+            send(b"y")
+            assert (root / ".solte/config.toml").read_text() == saved_selection, "Preview/copy must not activate a wallet"
+            send(b"\x1b")
+            send(b"5j\r")
+            assert b"Log details" in output
+            send(b"y")
+            send(b"\x1b")
+            send(b"1")
             send(b"y")
             assert b"\x1b]52;" in output, "Copy must emit an OSC 52 clipboard request"
             send(b"t")

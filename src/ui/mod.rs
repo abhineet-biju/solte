@@ -77,7 +77,11 @@ impl Ui {
         }
         app.modal_scroll_limit = self.modal_scroll_limit;
         if let Some(
-            Modal::Inspect { scroll, .. } | Modal::Review { scroll, .. } | Modal::Help { scroll },
+            Modal::Log { scroll, .. }
+            | Modal::Wallet { scroll, .. }
+            | Modal::Inspect { scroll, .. }
+            | Modal::Review { scroll, .. }
+            | Modal::Help { scroll },
         ) = &mut app.modal
         {
             *scroll = (*scroll).min(self.modal_scroll_limit);
@@ -712,11 +716,7 @@ impl Ui {
         let rows: Vec<_> = visible
             .iter()
             .map(|record| {
-                let color = if record.error.is_some() {
-                    theme.red
-                } else {
-                    theme.green
-                };
+                let color = theme.transaction_color(record, address);
                 let delta = record
                     .balance_change(address)
                     .map(|d| {
@@ -735,13 +735,7 @@ impl Ui {
                     Cell::from(if record.error.is_some() { "×" } else { "✓" })
                         .style(Style::default().fg(color)),
                     Cell::from(short(&record.signature)),
-                    Cell::from(record.kind()).style(Style::default().fg(
-                        if record.error.is_some() {
-                            theme.red
-                        } else {
-                            theme.muted
-                        },
-                    )),
+                    Cell::from(record.activity(address)).style(Style::default().fg(color)),
                     Cell::from(delta).style(Style::default().fg(color)),
                     Cell::from(age).style(Style::default().fg(theme.muted)),
                 ])
@@ -763,7 +757,7 @@ impl Ui {
             ],
         )
         .header(
-            Row::new(["", "Signature", "Instruction", "Δ SOL", "Age"])
+            Row::new(["", "Signature", "Action", "Δ SOL", "Age"])
                 .style(Style::default().fg(theme.muted))
                 .bottom_margin(1),
         )
@@ -1012,15 +1006,7 @@ impl Ui {
         } else {
             String::new()
         };
-        let entries: Vec<_> = app
-            .log_entries()
-            .iter()
-            .filter(|entry| {
-                query.is_empty()
-                    || entry.message.to_lowercase().contains(&query)
-                    || entry.level.to_lowercase().contains(&query)
-            })
-            .collect();
+        let entries = app.visible_logs();
         let inner = if app.view == View::Logs {
             self.button(
                 frame,
@@ -1040,7 +1026,7 @@ impl Ui {
             );
             frame.render_widget(
                 Paragraph::new(if query.is_empty() {
-                    format!("{} entries", entries.len())
+                    format!("{} entries · newest first", entries.len())
                 } else {
                     format!(
                         "Filter: {} · {} matches",
@@ -1065,59 +1051,84 @@ impl Ui {
         } else {
             inner
         };
-        let end = entries.len().saturating_sub(
-            app.log_scroll
-                .min(entries.len().saturating_sub(inner.height as usize)),
-        );
-        let start = end.saturating_sub(inner.height as usize);
-        let lines: Vec<_> = entries
-            .iter()
-            .skip(start)
-            .take(end - start)
-            .map(|entry| {
-                let seconds = entry.timestamp % 86_400;
-                let time = format!(
-                    "{:02}:{:02}:{:02}",
-                    seconds / 3600,
-                    seconds / 60 % 60,
-                    seconds % 60
-                );
-                let color = match entry.level.as_str() {
-                    "ERROR" => theme.red,
-                    "WARN" => theme.accent,
-                    _ => theme.green,
-                };
-                Line::from(vec![
-                    Span::styled(format!("{time} UTC  "), Style::default().fg(theme.muted)),
-                    Span::styled(format!("{:5}  ", entry.level), Style::default().fg(color)),
-                    Span::styled(
-                        entry.message.replace('\n', " · "),
-                        Style::default().fg(theme.text),
-                    ),
-                ])
-            })
-            .collect();
-        let paragraph = Paragraph::new(if lines.is_empty() {
-            vec![Line::from(Span::styled(
-                if query.is_empty() {
+        if entries.is_empty() {
+            frame.render_widget(
+                Paragraph::new(if query.is_empty() {
                     "Ready. Wallet actions and connection events appear here."
                 } else {
                     "No matching logs. Press [x] to clear the filter."
-                },
-                Style::default().fg(theme.muted),
-            ))]
-        } else {
-            lines
-        });
-        if app.view == View::Logs {
-            let paragraph = paragraph.wrap(Wrap { trim: false });
-            let offset = paragraph
-                .line_count(inner.width)
-                .saturating_sub(inner.height as usize)
-                .min(u16::MAX as usize) as u16;
-            frame.render_widget(paragraph.scroll((offset, 0)), inner);
-        } else {
-            frame.render_widget(paragraph, inner);
+                })
+                .style(Style::default().fg(theme.muted)),
+                inner,
+            );
+            return;
+        }
+        let detailed = app.view == View::Logs && inner.height >= 4;
+        let row_height = if detailed { 3 } else { 1 };
+        let count = (inner.height / row_height).max(1) as usize;
+        let cursor = app.log_scroll.min(entries.len() - 1);
+        let start = cursor.saturating_sub(count - 1);
+        for (row, (index, entry)) in entries
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(count)
+            .enumerate()
+        {
+            let y = inner.y + row as u16 * row_height;
+            let seconds = entry.timestamp % 86_400;
+            let time = format!(
+                "{:02}:{:02}:{:02} UTC",
+                seconds / 3600,
+                seconds / 60 % 60,
+                seconds % 60
+            );
+            let color = theme.log_color(&entry.level);
+            let rect = Rect::new(inner.x, y, inner.width, if detailed { 2 } else { 1 });
+            let header = Line::from(vec![
+                Span::styled(format!("{time}  "), Style::default().fg(theme.muted)),
+                Span::styled(
+                    format!("{:5}  ", entry.level),
+                    Style::default().fg(color).bold(),
+                ),
+                Span::styled(
+                    if detailed {
+                        if entry.signature().is_some() {
+                            "Signature available · [Enter] details".into()
+                        } else {
+                            "[Enter] details".into()
+                        }
+                    } else {
+                        clean_text(&entry.message).replace('\n', " · ")
+                    },
+                    Style::default().fg(if detailed { theme.muted } else { color }),
+                ),
+            ]);
+            let mut lines = vec![header];
+            if detailed {
+                lines.push(Line::from(Span::styled(
+                    clean_text(&entry.message).replace('\n', " · "),
+                    Style::default().fg(color),
+                )));
+            }
+            frame.render_widget(
+                Paragraph::new(lines).style(Style::default().bg(
+                    if index == cursor && app.pane == Pane::Logs {
+                        theme.selected
+                    } else {
+                        theme.panel
+                    },
+                )),
+                rect,
+            );
+            self.target(rect, Action::SelectLog(index));
+            if detailed && y + 2 < inner.bottom() {
+                frame.render_widget(
+                    Paragraph::new("─".repeat(inner.width as usize))
+                        .style(Style::default().fg(theme.border)),
+                    Rect::new(inner.x, y + 2, inner.width, 1),
+                );
+            }
         }
     }
 
@@ -1200,6 +1211,8 @@ impl Ui {
             Modal::Funding { .. } => "Fund Devnet wallet",
             Modal::Form(form) => form.title(),
             Modal::Profiles { .. } => "RPC profiles",
+            Modal::Log { .. } => "Log details",
+            Modal::Wallet { .. } => "Wallet details",
             Modal::Inspect { .. } => "Transaction inspector",
             Modal::Review { .. } => "Review SOL transfer",
             Modal::Help { .. } => "Solte keyboard & mouse",
@@ -1457,6 +1470,90 @@ impl Ui {
                     false,
                 );
             }
+            Modal::Log { entry, scroll } => {
+                let mut lines = vec![
+                    format!("{} · Unix timestamp {}", entry.level, entry.timestamp),
+                    String::new(),
+                ];
+                lines.extend(entry.message.lines().map(clean_text));
+                self.inspection_body(frame, inner, lines, *scroll, theme);
+                self.button(
+                    frame,
+                    Rect::new(inner.x, inner.bottom() - 1, 14, 1),
+                    "Copy log [y]",
+                    Action::CopyLog,
+                    theme,
+                    false,
+                );
+                if entry.signature().is_some() {
+                    self.button(
+                        frame,
+                        Rect::new(inner.x + 15, inner.bottom() - 1, 15, 1),
+                        "Signature [s]",
+                        Action::CopySignature,
+                        theme,
+                        false,
+                    );
+                    self.button(
+                        frame,
+                        Rect::new(
+                            inner.x + 31,
+                            inner.bottom() - 1,
+                            14.min(inner.width.saturating_sub(31)),
+                            1,
+                        ),
+                        "Explorer [o]",
+                        Action::ExplorerTransaction,
+                        theme,
+                        false,
+                    );
+                }
+            }
+            Modal::Wallet { index, scroll } => {
+                if let Some(wallet) = app.wallets.get(*index) {
+                    let lines = vec![
+                        clean_text(&wallet.name),
+                        if *index == app.selected_wallet {
+                            "Active wallet".into()
+                        } else {
+                            "Preview only · active wallet unchanged".into()
+                        },
+                        "PUBLIC ADDRESS".into(),
+                        wallet.address.clone(),
+                        String::new(),
+                        if wallet.program {
+                            "Program identity · read-only".into()
+                        } else {
+                            "Standard Solana keypair".into()
+                        },
+                        String::new(),
+                        "KEY FILE".into(),
+                        clean_text(&wallet.path.display().to_string()),
+                    ];
+                    self.inspection_body(frame, inner, lines, *scroll, theme);
+                    self.button(
+                        frame,
+                        Rect::new(inner.x, inner.bottom() - 1, 18, 1),
+                        "Copy address [y]",
+                        Action::CopyWallet(*index),
+                        theme,
+                        false,
+                    );
+                    self.button(
+                        frame,
+                        Rect::new(
+                            inner.x + 20,
+                            inner.bottom() - 1,
+                            24.min(inner.width.saturating_sub(20)),
+                            1,
+                        ),
+                        "Use wallet [Enter]",
+                        Action::ActivateWallet(*index),
+                        theme,
+                        false,
+                    );
+                }
+            }
             Modal::Inspect { signature, scroll } => {
                 let mut lines = app
                     .records
@@ -1549,7 +1646,10 @@ impl Ui {
                     "",
                     "WALLETS AND NETWORK",
                     "[n] New wallet   [i] Import   []] Cycle wallet",
-                    "[y] Copy wallet address",
+                    "[y] Copy wallet address; Wallets copies the previewed identity",
+                    "Logs: [Enter]/click opens entry; [y] copies its full text",
+                    "Log details: [s] copies signature; [o] opens Explorer when available",
+                    "Wallets: [Enter]/click opens details; confirm to use wallet",
                     "[f] Funding options   [s] Review and send SOL",
                     "[p] RPC profiles      [r]/[R] Refresh state",
                     "Refresh shows progress, then success or failure.",
@@ -1998,7 +2098,7 @@ mod tests {
         ] {
             for view in View::ALL {
                 app.switch_view(view);
-                for modal in 0..7 {
+                for modal in 0..9 {
                     app.modal = match modal {
                         0 => None,
                         1 => Some(Modal::Appearance {
@@ -2016,6 +2116,17 @@ mod tests {
                         ))),
                         5 => Some(Modal::Inspect {
                             signature: app.records[0].signature.clone(),
+                            scroll: 100,
+                        }),
+                        6 => Some(Modal::Wallet {
+                            index: 1,
+                            scroll: 100,
+                        }),
+                        7 => Some(Modal::Log {
+                            entry: crate::model::LogEntry::new(
+                                "ERROR",
+                                format!("Failed {}", app.records[0].signature),
+                            ),
                             scroll: 100,
                         }),
                         _ => Some(Modal::Help { scroll: 100 }),

@@ -34,7 +34,7 @@ impl Ui {
                     Line::from(if app.wallet_cursor == app.selected_wallet {
                         "Active wallet"
                     } else {
-                        "[Enter] or click to make active"
+                        "[Enter] or click for details"
                     }),
                     Line::from(""),
                     Line::from("PUBLIC ADDRESS"),

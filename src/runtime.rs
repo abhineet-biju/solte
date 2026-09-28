@@ -328,6 +328,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         && matches!(
             action,
             Action::SelectWallet(_)
+                | Action::ActivateWallet(_)
                 | Action::SelectProfile(_)
                 | Action::NextWallet
                 | Action::New
@@ -400,7 +401,39 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 form.fields[0].insert(&value);
             }
         }
-        Action::SelectWallet(index) => {
+        Action::SelectWallet(index) if app.view == crate::app::View::Wallets => {
+            if index < app.wallets.len() {
+                app.wallet_cursor = index;
+                app.modal = Some(Modal::Wallet { index, scroll: 0 });
+            }
+        }
+        Action::SelectLog(index) => {
+            if let Some(entry) = app.visible_logs().get(index).map(|entry| (*entry).clone()) {
+                app.focus_log(index);
+                app.modal = Some(Modal::Log { entry, scroll: 0 });
+            }
+        }
+        Action::CopyLog => {
+            if let Some(Modal::Log { entry, .. }) = &app.modal {
+                copy(format!(
+                    "{} {}\n{}",
+                    entry.timestamp, entry.level, entry.message
+                ))?;
+                app.status = "Log copy requested · terminal clipboard support required".into();
+            }
+        }
+        Action::CopyWallet(index) => {
+            copy(
+                app.wallets
+                    .get(index)
+                    .context("Wallet unavailable")?
+                    .address
+                    .clone(),
+            )?;
+            app.status = "Address copy requested · active wallet unchanged".into();
+        }
+        Action::SelectWallet(index) | Action::ActivateWallet(index) => {
+            app.modal = None;
             if index < app.wallets.len() && index != app.selected_wallet {
                 app.selected_wallet = index;
                 app.wallet_cursor = index;
@@ -550,6 +583,9 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
 }
 
 fn selected_signature(app: &App) -> Option<String> {
+    if let Some(Modal::Log { entry, .. }) = &app.modal {
+        return entry.signature();
+    }
     if let Some(Modal::Inspect { signature, .. }) = &app.modal {
         return Some(signature.clone());
     }
@@ -753,4 +789,86 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn log_inspection_keeps_the_selected_entry_when_new_logs_arrive() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::new(root.path().into(), crate::config::Config::default(), vec![]);
+        app.switch_view(crate::app::View::Logs);
+        let signature = solana_signature::Signature::from([8; 64]).to_string();
+        app.log("INFO", format!("Confirmed {signature}"));
+        let (network_sender, _) = mpsc::channel(8);
+        let (operation_sender, _) = mpsc::channel(8);
+        let (local_sender, _) = mpsc::channel(8);
+        let mut services = Services {
+            store: Store::open(root.path()).unwrap(),
+            network_sender,
+            operation_sender,
+            local_sender,
+            monitor: None,
+            jobs: JoinSet::new(),
+            offline: true,
+        };
+        handle(&mut app, &mut services, Action::SelectLog(0))
+            .await
+            .unwrap();
+        app.log("WARN", "New unrelated entry");
+        assert_eq!(selected_signature(&app), Some(signature));
+        assert!(!app.follow);
+        assert_eq!(app.visible_logs().len(), 1);
+        handle(&mut app, &mut services, Action::Close)
+            .await
+            .unwrap();
+        app.navigate(&Action::Follow);
+        assert_eq!(app.visible_logs().len(), 2);
+        assert_eq!(app.log_scroll, 0);
+    }
+
+    #[tokio::test]
+    async fn wallet_preview_does_not_activate_until_confirmed() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::new(root.path().into(), crate::config::Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.switch_view(crate::app::View::Wallets);
+        let (network_sender, _) = mpsc::channel(8);
+        let (operation_sender, _) = mpsc::channel(8);
+        let (local_sender, _) = mpsc::channel(8);
+        let mut services = Services {
+            store: Store::open(root.path()).unwrap(),
+            network_sender,
+            operation_sender,
+            local_sender,
+            monitor: None,
+            jobs: JoinSet::new(),
+            offline: true,
+        };
+        handle(&mut app, &mut services, Action::SelectWallet(1))
+            .await
+            .unwrap();
+        assert_eq!(app.selected_wallet, 0);
+        assert!(matches!(app.modal, Some(Modal::Wallet { index: 1, .. })));
+        assert_eq!(
+            app.key(crossterm::event::KeyEvent::from(
+                crossterm::event::KeyCode::Char('y')
+            )),
+            Some(Action::CopyWallet(1))
+        );
+        handle(&mut app, &mut services, Action::Close)
+            .await
+            .unwrap();
+        assert_eq!(app.selected_wallet, 0);
+        handle(&mut app, &mut services, Action::SelectWallet(1))
+            .await
+            .unwrap();
+        handle(&mut app, &mut services, Action::ActivateWallet(1))
+            .await
+            .unwrap();
+        assert_eq!(app.selected_wallet, 1);
+        assert!(app.modal.is_none());
+    }
 }

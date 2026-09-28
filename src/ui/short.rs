@@ -259,7 +259,7 @@ impl Ui {
                     " {} {}  {}{}",
                     if record.error.is_some() { "×" } else { "✓" },
                     short(&record.signature),
-                    record.kind(),
+                    record.activity(app.wallet().map(|w| w.address.as_str()).unwrap_or_default()),
                     if inner.width >= 52 {
                         format!("  slot {}", record.slot)
                     } else if inner.width >= 44 {
@@ -270,11 +270,10 @@ impl Ui {
                 ))
                 .style(
                     Style::default()
-                        .fg(if record.error.is_some() {
-                            theme.red
-                        } else {
-                            theme.text
-                        })
+                        .fg(theme.transaction_color(
+                            record,
+                            app.wallet().map(|w| w.address.as_str()).unwrap_or_default(),
+                        ))
                         .bg(if index == app.transaction_cursor {
                             theme.selected
                         } else {
