@@ -14,10 +14,32 @@ use crate::{
 
 impl Ui {
     pub(super) fn workspace(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        if app.view == View::Wallets && area.width >= 90 {
-            let left = Rect::new(area.x, area.y, 34, area.height);
-            self.adaptive_pane(frame, app, left, Pane::Wallets, theme);
-            let right = Rect::new(left.right() + 1, area.y, area.width - 35, area.height);
+        if app.view == View::Wallets && (area.width >= 80 || area.height >= 17) {
+            let (list, details) = if area.width >= 80 {
+                let width = if area.width >= 100 { 34 } else { 32 };
+                (
+                    Rect::new(area.x, area.y, width, area.height),
+                    Rect::new(
+                        area.x + width + 1,
+                        area.y,
+                        area.width - width - 1,
+                        area.height,
+                    ),
+                )
+            } else {
+                let height = (area.height / 2).max(8);
+                (
+                    Rect::new(area.x, area.y, area.width, height),
+                    Rect::new(
+                        area.x,
+                        area.y + height + 1,
+                        area.width,
+                        area.height - height - 1,
+                    ),
+                )
+            };
+            self.adaptive_pane(frame, app, list, Pane::Wallets, theme);
+            let right = details;
             let block = Block::bordered()
                 .border_type(BorderType::Rounded)
                 .title(" Identity details ")
@@ -300,6 +322,32 @@ mod tests {
     use super::*;
     use crate::{config::Config, demo};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn zoomed_wallet_views_keep_identity_details_visible() {
+        for (width, height) in [(80, 20), (88, 22), (90, 22), (79, 24), (60, 22)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            demo::populate(&mut app);
+            app.switch_view(View::Wallets);
+            app.wallet_cursor = 1;
+            let mut ui = Ui::default();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("Identity details"), "{width}x{height}");
+            assert!(text.contains("PUBLIC ADDRESS"), "{width}x{height}");
+            assert_eq!(app.selected_wallet, 0);
+            for hit in &ui.hits {
+                assert!(hit.area.right() <= width && hit.area.bottom() <= height);
+            }
+        }
+    }
 
     #[test]
     fn overview_preserves_left_wallets_and_right_network_with_contained_controls() {

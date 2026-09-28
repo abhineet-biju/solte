@@ -119,24 +119,47 @@ impl Ui {
             .take(count)
             .enumerate()
         {
-            self.button(
-                frame,
-                Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
-                &format!(
-                    "{} {}  {}{}",
+            let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+            let name: String = clean_text(&wallet.name)
+                .chars()
+                .take(if inner.width < 44 {
+                    inner.width.saturating_sub(4) as usize
+                } else {
+                    20
+                })
+                .collect();
+            let label = if inner.width < 44 {
+                format!(
+                    " {} {}",
                     if index == app.selected_wallet {
                         "●"
                     } else {
                         "○"
                     },
-                    clean_text(&wallet.name),
+                    name
+                )
+            } else {
+                format!(
+                    " {} {:20} {}{}",
+                    if index == app.selected_wallet {
+                        "●"
+                    } else {
+                        "○"
+                    },
+                    name,
                     short(&wallet.address),
                     if wallet.program { " · program" } else { "" }
-                ),
-                Action::SelectWallet(index),
-                theme,
-                index == app.wallet_cursor,
+                )
+            };
+            frame.render_widget(
+                Paragraph::new(label).style(if index == app.wallet_cursor {
+                    theme.selected_control()
+                } else {
+                    Style::default().fg(theme.text).bg(theme.panel)
+                }),
+                rect,
             );
+            self.target(rect, Action::SelectWallet(index));
         }
         let y = inner.bottom() - if stacked { 2 } else { 1 };
         self.button(
