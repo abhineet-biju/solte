@@ -105,13 +105,27 @@ impl Ui {
                 theme,
             );
         }
+        let stacked_wallets = left_width == 0 && top.height >= 11;
         let center_pane = match app.pane {
-            Pane::Wallets if left_width == 0 => Pane::Wallets,
+            Pane::Wallets if left_width == 0 && !stacked_wallets => Pane::Wallets,
             Pane::Logs if logs_height == 0 => Pane::Logs,
             _ => Pane::Wallet,
         };
         self.adaptive_pane(frame, app, center, center_pane, theme);
-        self.network_sidebar(frame, app, sidebar, theme);
+        if stacked_wallets {
+            let wallet_height = (sidebar.height / 3).clamp(5, 8);
+            let wallets = Rect::new(sidebar.x, sidebar.y, sidebar.width, wallet_height);
+            let network = Rect::new(
+                sidebar.x,
+                sidebar.y + wallet_height + 1,
+                sidebar.width,
+                sidebar.height - wallet_height - 1,
+            );
+            self.identity_sidebar(frame, app, wallets, theme);
+            self.network_sidebar(frame, app, network, theme);
+        } else {
+            self.network_sidebar(frame, app, sidebar, theme);
+        }
     }
 
     fn adaptive_pane(
@@ -130,7 +144,14 @@ impl Ui {
     }
 
     fn identity_sidebar(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let inner = self.panel(frame, app, area, Pane::Wallets, "Identities", theme);
+        let inner = self.panel(
+            frame,
+            app,
+            area,
+            Pane::Wallets,
+            &format!("Wallets · {}", app.wallets.len()),
+            theme,
+        );
         let count = inner.height.saturating_sub(2) as usize;
         let offset = app.wallet_cursor.saturating_sub(count.saturating_sub(1));
         for (row, (index, wallet)) in app
@@ -263,6 +284,41 @@ mod tests {
     use super::*;
     use crate::{config::Config, demo};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn zoomed_overview_keeps_all_four_summaries_without_overlap() {
+        for (width, height) in [(80, 20), (90, 22), (99, 24), (100, 22), (140, 42)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            demo::populate(&mut app);
+            let mut ui = Ui::default();
+            Terminal::new(TestBackend::new(width, height))
+                .unwrap()
+                .draw(|frame| ui.draw(frame, &app))
+                .unwrap();
+            let panels: Vec<_> = Pane::ALL
+                .into_iter()
+                .map(|pane| {
+                    ui.hits
+                        .iter()
+                        .find(|hit| hit.action == Action::Focus(pane))
+                        .unwrap()
+                        .area
+                })
+                .collect();
+            for (index, panel) in panels.iter().enumerate() {
+                assert!(panel.height >= 3);
+                for other in panels.iter().skip(index + 1) {
+                    assert!(panel.intersection(*other).is_empty());
+                }
+            }
+            assert!(
+                ui.hits
+                    .iter()
+                    .any(|hit| hit.action == Action::SelectWallet(0))
+            );
+            assert!(ui.hits.iter().any(|hit| hit.action == Action::Fund));
+        }
+    }
 
     #[test]
     fn log_filter_is_independent_of_transaction_filter() {

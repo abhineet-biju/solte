@@ -321,7 +321,7 @@ impl Ui {
         );
         let mut x = area.x + 1;
         for (i, view) in View::ALL.iter().enumerate() {
-            let label = format!("{} {}", i + 1, view.name());
+            let label = format!("{} {}", i + 1, view.nav_label(area.width));
             let width = label.len() as u16 + 2;
             self.button(
                 frame,
@@ -446,7 +446,7 @@ impl Ui {
     fn wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let title = app
             .wallet()
-            .map(|w| format!("Activity · {}", clean_text(&w.name)))
+            .map(|w| format!("Transactions · {}", clean_text(&w.name)))
             .unwrap_or_else(|| "Wallet overview".into());
         let inner = self.panel(frame, app, area, Pane::Wallet, &title, theme);
         let inner = inner.inner(ratatui::layout::Margin::new(1, 0));
@@ -1514,7 +1514,7 @@ impl Ui {
                 let lines = [
                     "NAVIGATION",
                     "Tab / Shift-Tab       Focus regions in this view",
-                    "1–5                   Overview / Wallets / Activity / Network / Logs",
+                    "1–5                   Overview / Wallets / Transactions / Network / Logs",
                     "h j k l / arrows      Navigate inside the focused panel",
                     "k at the top          Focus the main panel selector",
                     "h/l in selector       Switch view; j/Enter enters it",
@@ -1740,19 +1740,29 @@ mod tests {
                 app.focused_control = Some(Action::New);
                 terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
                 assert_focus(&terminal, &ui, Action::New, theme);
-                // Wide layouts stack these controls; compact layouts place them side by side.
+                let pane = ui
+                    .hits
+                    .iter()
+                    .find(|hit| hit.action == Action::Focus(app.pane))
+                    .unwrap()
+                    .area;
                 let create = ui
                     .hits
                     .iter()
                     .rev()
-                    .find(|hit| hit.action == Action::New)
+                    .find(|hit| {
+                        hit.action == Action::New && pane.contains((hit.area.x, hit.area.y).into())
+                    })
                     .unwrap()
                     .area;
                 let import = ui
                     .hits
                     .iter()
                     .rev()
-                    .find(|hit| hit.action == Action::Import)
+                    .find(|hit| {
+                        hit.action == Action::Import
+                            && pane.contains((hit.area.x, hit.area.y).into())
+                    })
                     .unwrap()
                     .area;
                 let direction = if import.y > create.y {

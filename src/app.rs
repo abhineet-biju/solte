@@ -33,6 +33,7 @@ impl Pane {
 pub enum View {
     Overview,
     Wallets,
+    #[value(name = "transactions", alias = "activity")]
     Activity,
     Network,
     Logs,
@@ -50,11 +51,19 @@ impl View {
         match self {
             Self::Overview => "Overview",
             Self::Wallets => "Wallets",
-            Self::Activity => "Activity",
+            Self::Activity => "Transactions",
             Self::Network => "Network",
             Self::Logs => "Logs",
         }
     }
+    pub fn nav_label(self, width: u16) -> &'static str {
+        if self == Self::Activity && width < 68 {
+            "Txns"
+        } else {
+            self.name()
+        }
+    }
+
     pub fn pane(self) -> Pane {
         match self {
             Self::Overview | Self::Activity => Pane::Wallet,

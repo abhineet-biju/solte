@@ -39,7 +39,7 @@ impl Ui {
         );
         let mut x = area.x;
         for (i, view) in View::ALL.iter().enumerate() {
-            let label = format!("{} {}", i + 1, view.name());
+            let label = format!("{} {}", i + 1, view.nav_label(area.width));
             let width = label.len() as u16 + 2;
             self.button(
                 frame,
@@ -149,7 +149,18 @@ impl Ui {
     }
 
     pub(super) fn short_wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let inner = self.panel(frame, app, area, Pane::Wallet, "Wallet activity", theme);
+        let inner = self.panel(
+            frame,
+            app,
+            area,
+            Pane::Wallet,
+            if app.view == View::Activity {
+                "Transactions"
+            } else {
+                "Wallet activity"
+            },
+            theme,
+        );
         let Some(wallet) = app.wallet() else {
             self.welcome(frame, inner, theme);
             return;
