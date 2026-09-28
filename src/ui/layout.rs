@@ -14,14 +14,16 @@ use crate::{
 
 impl Ui {
     pub(super) fn workspace(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        if app.zoomed || area.width < 80 {
+        let single_pane = app.zoomed || area.width < 80;
+        if single_pane && app.pane == Pane::Logs {
             self.adaptive_pane(frame, app, area, app.pane, theme);
             return;
         }
-        let logs_height = if area.height >= 22 {
-            (area.height / 5).clamp(5, 9)
-        } else {
-            0
+        let logs_height = match area.height {
+            22.. => (area.height / 5).clamp(5, 9),
+            14..=21 => 4,
+            11..=13 => 3,
+            _ => 0,
         };
         let top = Rect::new(
             area.x,
@@ -29,6 +31,18 @@ impl Ui {
             area.width,
             area.height - if logs_height > 0 { logs_height + 1 } else { 0 },
         );
+        if logs_height > 0 {
+            self.logs(
+                frame,
+                app,
+                Rect::new(area.x, area.bottom() - logs_height, area.width, logs_height),
+                theme,
+            );
+        }
+        if single_pane {
+            self.adaptive_pane(frame, app, top, app.pane, theme);
+            return;
+        }
         let sidebar = Rect::new(top.right() - 26, top.y, 26, top.height);
         let left_width = if area.width >= 100 { 22 } else { 0 };
         let center_x = area.x + if left_width > 0 { left_width + 1 } else { 0 };
@@ -48,14 +62,6 @@ impl Ui {
         };
         self.adaptive_pane(frame, app, center, center_pane, theme);
         self.network_sidebar(frame, app, sidebar, theme);
-        if logs_height > 0 {
-            self.logs(
-                frame,
-                app,
-                Rect::new(area.x, area.bottom() - logs_height, area.width, logs_height),
-                theme,
-            );
-        }
     }
 
     fn adaptive_pane(
@@ -210,6 +216,37 @@ mod tests {
     use super::*;
     use crate::{config::Config, demo};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn short_and_expanded_views_keep_readable_log_context() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        demo::populate(&mut app);
+        app.pane = Pane::Wallet;
+        for (width, height) in [(60, 17), (100, 14), (100, 20), (140, 42)] {
+            for zoomed in [false, true] {
+                app.zoomed = zoomed;
+                let mut ui = Ui::default();
+                Terminal::new(TestBackend::new(width, height))
+                    .unwrap()
+                    .draw(|frame| ui.draw(frame, &app))
+                    .unwrap();
+                let logs = ui
+                    .hits
+                    .iter()
+                    .find(|hit| hit.action == Action::Focus(Pane::Logs))
+                    .unwrap();
+                assert!(logs.area.height >= 3);
+                let wallet = ui
+                    .hits
+                    .iter()
+                    .find(|hit| hit.action == Action::Focus(Pane::Wallet))
+                    .unwrap();
+                assert!(wallet.area.height >= 7);
+                assert!(wallet.area.intersection(logs.area).is_empty());
+                assert!(ui.hits.iter().any(|hit| hit.action == Action::Fund));
+            }
+        }
+    }
 
     #[test]
     fn wide_short_terminals_keep_the_network_sidebar_visible() {
