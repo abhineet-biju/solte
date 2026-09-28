@@ -1317,6 +1317,15 @@ impl Ui {
                 );
             }
             Modal::Profiles { selected } => {
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "Profile {} / {} · j/k or wheel to choose",
+                        selected + 1,
+                        app.config.profiles.len()
+                    ))
+                    .style(Style::default().fg(theme.muted)),
+                    Rect::new(inner.x, inner.y, inner.width, 1),
+                );
                 let capacity = (inner.height.saturating_sub(4) / 2).max(1) as usize;
                 let offset = selected.saturating_sub(capacity - 1);
                 for (row, (index, profile)) in app
@@ -1371,8 +1380,12 @@ impl Ui {
                     .unwrap_or_else(|| {
                         vec!["Transaction is no longer in the current view.".into()]
                     });
-                if inner.height < 12 && lines.len() >= 2 && lines[0] == "Signature" {
-                    lines.splice(0..2, [format!("Signature  {} · copy y", short(signature))]);
+                if inner.height < 12
+                    && lines
+                        .first()
+                        .is_some_and(|line| line.starts_with("Signature  "))
+                {
+                    lines[0] = format!("Signature  {} · copy y", short(signature));
                 }
                 self.inspection_body(frame, inner, lines, *scroll, theme);
                 self.button(
@@ -1641,6 +1654,16 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
         terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
         ui.sync_scroll(&mut app);
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("copy y"));
+        assert!(text.contains("Slot"));
+        assert!(text.contains("Error"));
         assert!(app.modal_scroll_limit > 0);
         app.navigate(&Action::Scroll(65535));
         app.navigate(&Action::Scroll(65535));

@@ -61,6 +61,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Filter transactions / failures only | / / e |
 | Fetch or load older records | b |
 | Open transaction explorer / copy wallet address | o / y |
+| Clear transaction search | x |
 | Follow logs / clear visible logs | F / C |
 | Cycle activity tabs | v |
 | Choose theme / motion | t / m |
@@ -121,3 +122,5 @@ python3 scripts/terminal_smoke.py \
 These checks only accept loopback RPC endpoints and create disposable keypairs. The terminal test also requires `solana-keygen` on PATH. The CI workflow runs the regular checks and offline terminal smoke test on macOS and Linux.
 
 The source is organized around wallet operations, network monitoring, local storage, application state, rendering, and runtime coordination. Rendering does no network or disk I/O. A session identifier prevents stale responses from updating a newly selected wallet or profile.
+
+Transaction inspectors support Home/End and bounded scrolling with a position indicator. Escape closes a dialog without changing the underlying expanded layout. In offline mode, funding and sending explain their unavailability before opening a form.

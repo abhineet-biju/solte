@@ -340,7 +340,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         Action::Import => app.open_form(FormKind::Import),
         Action::Fund | Action::Send => {
             if services.offline {
-                bail!("Unavailable offline. Restart Solte without --offline to fund or send SOL.");
+                bail!("Offline: restart without --offline.");
             }
             let wallet = app.wallet().context("Create or import a wallet first")?;
             if wallet.program && action == Action::Send {
