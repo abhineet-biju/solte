@@ -93,39 +93,30 @@ impl Ui {
             self.adaptive_pane(frame, app, top, app.pane, theme);
             return;
         }
-        let sidebar = Rect::new(top.right() - 26, top.y, 26, top.height);
-        let left_width = if area.width >= 100 { 22 } else { 0 };
-        let center_x = area.x + if left_width > 0 { left_width + 1 } else { 0 };
+        let (left_width, right_width) = if area.width >= 100 {
+            (22, 26)
+        } else {
+            (
+                (area.width / 5).clamp(16, 20),
+                (area.width / 4).clamp(22, 25),
+            )
+        };
+        let sidebar = Rect::new(top.right() - right_width, top.y, right_width, top.height);
+        let center_x = area.x + left_width + 1;
         let center = Rect::new(center_x, top.y, sidebar.x - center_x - 1, top.height);
-        if left_width > 0 {
-            self.identity_sidebar(
-                frame,
-                app,
-                Rect::new(area.x, top.y, left_width, top.height),
-                theme,
-            );
-        }
-        let stacked_wallets = left_width == 0 && top.height >= 11;
-        let center_pane = match app.pane {
-            Pane::Wallets if left_width == 0 && !stacked_wallets => Pane::Wallets,
-            Pane::Logs if logs_height == 0 => Pane::Logs,
-            _ => Pane::Wallet,
+        self.identity_sidebar(
+            frame,
+            app,
+            Rect::new(area.x, top.y, left_width, top.height),
+            theme,
+        );
+        let center_pane = if app.pane == Pane::Logs && logs_height == 0 {
+            Pane::Logs
+        } else {
+            Pane::Wallet
         };
         self.adaptive_pane(frame, app, center, center_pane, theme);
-        if stacked_wallets {
-            let wallet_height = (sidebar.height / 3).clamp(5, 8);
-            let wallets = Rect::new(sidebar.x, sidebar.y, sidebar.width, wallet_height);
-            let network = Rect::new(
-                sidebar.x,
-                sidebar.y + wallet_height + 1,
-                sidebar.width,
-                sidebar.height - wallet_height - 1,
-            );
-            self.identity_sidebar(frame, app, wallets, theme);
-            self.network_sidebar(frame, app, network, theme);
-        } else {
-            self.network_sidebar(frame, app, sidebar, theme);
-        }
+        self.network_sidebar(frame, app, sidebar, theme);
     }
 
     fn adaptive_pane(
@@ -137,7 +128,9 @@ impl Ui {
         theme: Theme,
     ) {
         match pane {
-            Pane::Wallet if area.height < 22 => self.short_wallet(frame, app, area, theme),
+            Pane::Wallet if area.height < 22 || area.width < 52 => {
+                self.short_wallet(frame, app, area, theme)
+            }
             Pane::Wallets if area.height < 20 => self.short_wallets(frame, app, area, theme),
             _ => self.draw_pane(frame, app, area, pane, theme),
         }
@@ -189,7 +182,11 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
-            "+ New identity n",
+            if inner.width < 20 {
+                "+ New n"
+            } else {
+                "+ New identity n"
+            },
             Action::New,
             theme,
             false,
@@ -197,7 +194,11 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-            "Import keypair i",
+            if inner.width < 20 {
+                "Import i"
+            } else {
+                "Import keypair i"
+            },
             Action::Import,
             theme,
             false,
@@ -284,6 +285,43 @@ mod tests {
     use super::*;
     use crate::{config::Config, demo};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn overview_preserves_left_wallets_and_right_network_with_contained_controls() {
+        for (width, height) in [(80, 10), (80, 20), (90, 22), (99, 24), (140, 42)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            demo::populate(&mut app);
+            let mut ui = Ui::default();
+            Terminal::new(TestBackend::new(width, height))
+                .unwrap()
+                .draw(|frame| ui.draw(frame, &app))
+                .unwrap();
+            let area = |pane| {
+                ui.hits
+                    .iter()
+                    .find(|hit| hit.action == Action::Focus(pane))
+                    .unwrap()
+                    .area
+            };
+            let wallets = area(Pane::Wallets);
+            let activity = area(Pane::Wallet);
+            let network = area(Pane::Network);
+            assert_eq!(wallets.x, 0);
+            assert!(wallets.right() < activity.x && activity.right() < network.x);
+            assert_eq!(network.right(), width);
+            for hit in &ui.hits {
+                if hit.area.y >= activity.y && hit.area.y < activity.bottom() {
+                    assert!(
+                        [wallets, activity, network]
+                            .iter()
+                            .any(|panel| panel.intersection(hit.area) == hit.area),
+                        "{width}x{height} {:?}",
+                        hit.action
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn zoomed_overview_keeps_all_four_summaries_without_overlap() {
@@ -449,7 +487,7 @@ mod tests {
                 .iter()
                 .find(|h| h.action == Action::Focus(Pane::Network))
                 .unwrap();
-            assert_eq!(network.area.width, 26);
+            assert!((22..=26).contains(&network.area.width));
             assert_eq!(network.area.right(), width);
             assert!(ui.hits.iter().any(|h| h.action == Action::Fund));
             if width >= 100 {

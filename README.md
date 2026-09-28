@@ -52,7 +52,8 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 |---|---|
 | Move focus within the current view | Tab / Shift-Tab |
 | Overview / Wallets / Transactions / Network / Logs | 1 / 2 / 3 / 4 / 5 |
-| Navigate options within the focused panel | h / j / k / l, or arrow keys |
+| Previous / next main view | Left / Right arrows |
+| Navigate options within the focused panel | h / j / k / l, Up / Down arrows |
 | Scroll the current list or view | Page Up / Page Down |
 | Activate the focused option | Enter |
 | Create / import / cycle identity | n / i / ] |
@@ -69,7 +70,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 
 The top bar switches between distinct views. Overview combines wallet, activity, network, and log summaries; Wallets, Transactions, Network, and Logs use the workspace for their own content. Overview's Open → links lead to the corresponding full view. At narrower widths Overview reduces the number of summaries while all five views remain accessible. The minimum size is 60 columns by 10 rows.
 
-The highlighted control has keyboard focus. Use k/up at the top of a page to reach the view selector, h/l to switch views, and j/down or Enter to enter the page. Tab and Shift-Tab move between visible focus regions without changing views. Clicks and Enter invoke the same actions. Forms accept normal text input, arrow keys move the cursor, and Tab switches fields. Each view preserves its navigation state; Transactions and Logs have separate search filters.
+The highlighted control has keyboard focus. Left/right arrows switch main views directly. Use k/up at the top of a page to reach the view selector, h/l to switch views there, and j/down or Enter to enter the page. In dialogs, left/right do not change the underlying view; in text fields they move the cursor. Tab and Shift-Tab move between visible focus regions without changing views. Clicks and Enter invoke the same actions. Forms accept normal text input, arrow keys move the cursor, and Tab switches fields. Each view preserves its navigation state; Transactions and Logs have separate search filters.
 
 Use `solte --view network` to open a particular view. `--view` also works with `--demo` and `--snapshot` for reproducible previews.
 
@@ -128,6 +129,6 @@ Transaction inspectors support Home/End and bounded scrolling with a position in
 
 Interaction styling is shared across all themes: a solid accent background marks the focused control or editable field; muted backgrounds and accent text indicate selection without focus. Wallet activity, errors, and connection health retain explicit symbols or labels. Moving focus never changes the active wallet until it is activated. Dialogs own focus while open, and closing them restores the underlying view and focus. In forms, the highlighted field receives typing; Enter submits the form.
 
-Overview retains all four summaries from 80 columns by 20 rows, stacking Wallets above Network when three columns would crowd the transaction controls. Smaller windows prioritize a usable summary and keep every full view accessible. Transactions is abbreviated to Txns in the narrowest tab bar; `--view transactions` also accepts the previous `activity` spelling.
+Overview retains all four summaries from 80 columns by 20 rows, keeping Wallets on the left and Network on the right. Narrower sidebars and wrapped wallet actions preserve the same arrangement when zooming. Smaller windows prioritize a usable summary and keep every full view accessible. Transactions is abbreviated to Txns in the narrowest tab bar; `--view transactions` also accepts the previous `activity` spelling.
 
 See [key-handling practices](docs/key-handling.md) for memory lifetime, file permissions, and the limits of development-key protection.

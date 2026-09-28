@@ -177,6 +177,7 @@ impl Ui {
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
         let mut x = inner.x;
+        let mut toolbar_y = inner.y + 1;
         for (label, action) in [
             ("Fund f", Action::Fund),
             ("Send s", Action::Send),
@@ -185,9 +186,13 @@ impl Ui {
             ("RPC p", Action::Profiles),
         ] {
             let width = label.len() as u16 + 2;
+            if x + width > inner.right() {
+                x = inner.x;
+                toolbar_y += 1;
+            }
             self.button(
                 frame,
-                Rect::new(x, inner.y + 1, width, 1),
+                Rect::new(x, toolbar_y, width, 1),
                 label,
                 action,
                 theme,
@@ -195,16 +200,18 @@ impl Ui {
             );
             x += width + 1;
         }
+        let data_y = toolbar_y + 1;
+        let toolbar_rows = toolbar_y - inner.y;
         let visible = app.visible_records();
         let filtered = u16::from(!app.filter.is_empty());
         if filtered > 0 {
             frame.render_widget(
                 Paragraph::new(format!(" Filter: {}", clean_text(&app.filter)))
                     .style(Style::default().fg(theme.accent)),
-                Rect::new(inner.x, inner.y + 2, inner.width, 1),
+                Rect::new(inner.x, data_y, inner.width, 1),
             );
         }
-        let count = inner.height.saturating_sub(3 + filtered) as usize;
+        let count = inner.height.saturating_sub(2 + toolbar_rows + filtered) as usize;
         let offset = app
             .transaction_cursor
             .saturating_sub(count.saturating_sub(1));
@@ -215,7 +222,7 @@ impl Ui {
             .take(count)
             .enumerate()
         {
-            let rect = Rect::new(inner.x, inner.y + 2 + filtered + row as u16, inner.width, 1);
+            let rect = Rect::new(inner.x, data_y + filtered + row as u16, inner.width, 1);
             frame.render_widget(
                 Paragraph::new(format!(
                     " {} {}  {}  slot {}",
@@ -249,7 +256,7 @@ impl Ui {
                     " No matching captured transactions."
                 })
                 .style(Style::default().fg(theme.muted)),
-                Rect::new(inner.x, inner.y + 2 + filtered, inner.width, 1),
+                Rect::new(inner.x, data_y + filtered, inner.width, 1),
             );
         }
         let y = inner.bottom() - 1;
