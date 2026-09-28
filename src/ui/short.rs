@@ -189,15 +189,22 @@ impl Ui {
         );
         let mut x = inner.x;
         let mut toolbar_y = inner.y + 1;
-        for (label, action) in [
+        let actions = [
             ("Fund [f]", Action::Fund),
             ("Send [s]", Action::Send),
             ("Copy [y]", Action::CopyAddress),
             ("Explorer", Action::ExplorerWallet),
             ("RPC [p]", Action::Profiles),
-        ] {
+        ];
+        let toolbar_width = actions
+            .iter()
+            .map(|(label, _)| label.len() as u16 + 2)
+            .sum::<u16>()
+            + actions.len() as u16
+            - 1;
+        for (index, (label, action)) in actions.into_iter().enumerate() {
             let width = label.len() as u16 + 2;
-            if x + width > inner.right() {
+            if x + width > inner.right() || (index == 3 && toolbar_width > inner.width) {
                 x = inner.x;
                 toolbar_y += 1;
             }
