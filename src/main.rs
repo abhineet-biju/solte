@@ -34,9 +34,9 @@ struct Args {
         help = "Render the current interface to an SVG file without network access"
     )]
     snapshot: Option<PathBuf>,
-    #[arg(long, default_value_t = 160, value_parser = clap::value_parser!(u16).range(80..=300))]
+    #[arg(long, default_value_t = 160, value_parser = clap::value_parser!(u16).range(60..=300))]
     width: u16,
-    #[arg(long, default_value_t = 48, value_parser = clap::value_parser!(u16).range(24..=120))]
+    #[arg(long, default_value_t = 48, value_parser = clap::value_parser!(u16).range(10..=120))]
     height: u16,
 }
 

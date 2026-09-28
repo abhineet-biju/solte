@@ -1,3 +1,4 @@
+mod short;
 pub mod theme;
 
 use std::{fmt::Write, path::Path, time::Instant};
@@ -135,45 +136,47 @@ impl Ui {
             Block::default().style(Style::default().bg(theme.bg).fg(theme.text)),
             area,
         );
-        if area.width < 80 || area.height < 24 {
+        if area.width < 60 || area.height < 10 {
             frame.render_widget(
-                Paragraph::new(
-                    "SOLTE\n\nEnlarge the terminal to at least 80 × 24.\nPress q to quit.",
-                )
+                Paragraph::new(format!("SOLTE\n\nTerminal: {} columns × {} rows\nMinimum: 60 × 10. Resize or reduce the font size.\nPress q to quit.", area.width, area.height))
                 .style(Style::default().fg(theme.accent)),
                 area,
             );
             return;
         }
-        let outer = Layout::vertical([
-            Constraint::Length(4),
-            Constraint::Min(5),
-            Constraint::Length(3),
-        ])
-        .split(area);
-        self.header(frame, app, outer[0], theme);
-        if app.zoomed || area.width < 100 || area.height < 34 {
-            self.draw_pane(frame, app, outer[1], app.pane, theme);
+        if area.height < 24 || area.width < 80 {
+            self.short_layout(frame, app, area, theme);
         } else {
-            let body = Layout::vertical([
-                Constraint::Min(14),
-                Constraint::Length((area.height / 5).clamp(6, 10)),
+            let outer = Layout::vertical([
+                Constraint::Length(4),
+                Constraint::Min(5),
+                Constraint::Length(3),
             ])
-            .spacing(1)
-            .split(outer[1]);
-            let columns = Layout::horizontal([
-                Constraint::Length(25),
-                Constraint::Min(42),
-                Constraint::Length(if area.width >= 140 { 33 } else { 27 }),
-            ])
-            .spacing(1)
-            .split(body[0]);
-            self.draw_pane(frame, app, columns[0], Pane::Wallets, theme);
-            self.draw_pane(frame, app, columns[1], Pane::Wallet, theme);
-            self.draw_pane(frame, app, columns[2], Pane::Network, theme);
-            self.draw_pane(frame, app, body[1], Pane::Logs, theme);
+            .split(area);
+            self.header(frame, app, outer[0], theme);
+            if app.zoomed || area.width < 100 || area.height < 34 {
+                self.draw_pane(frame, app, outer[1], app.pane, theme);
+            } else {
+                let body = Layout::vertical([
+                    Constraint::Min(14),
+                    Constraint::Length((area.height / 5).clamp(6, 10)),
+                ])
+                .spacing(1)
+                .split(outer[1]);
+                let columns = Layout::horizontal([
+                    Constraint::Length(25),
+                    Constraint::Min(42),
+                    Constraint::Length(if area.width >= 140 { 33 } else { 27 }),
+                ])
+                .spacing(1)
+                .split(body[0]);
+                self.draw_pane(frame, app, columns[0], Pane::Wallets, theme);
+                self.draw_pane(frame, app, columns[1], Pane::Wallet, theme);
+                self.draw_pane(frame, app, columns[2], Pane::Network, theme);
+                self.draw_pane(frame, app, body[1], Pane::Logs, theme);
+            }
+            self.footer(frame, app, outer[2], theme);
         }
-        self.footer(frame, app, outer[2], theme);
         if app.modal.is_some() {
             self.hits.clear();
             self.modal(frame, app, theme);
@@ -1013,7 +1016,9 @@ impl Ui {
         let height = match modal {
             Modal::Form(form) => (form.fields.len() * 3 + 10) as u16,
             Modal::Profiles { .. } => (app.config.profiles.len() * 2 + 7) as u16,
-            _ => screen.height.saturating_sub(6),
+            _ => screen
+                .height
+                .saturating_sub(if screen.height < 24 { 2 } else { 6 }),
         };
         let width = if matches!(modal, Modal::Inspect { .. } | Modal::Review { .. }) {
             104
@@ -1046,6 +1051,7 @@ impl Ui {
             false,
         );
         match modal {
+            Modal::Form(form) if screen.height < 20 => self.short_form(frame, form, inner, theme),
             Modal::Form(form) => {
                 let capacity = (inner.height.saturating_sub(8) / 3).max(1) as usize;
                 let offset = form.active.saturating_sub(capacity - 1);
@@ -1484,7 +1490,15 @@ mod tests {
 
     #[test]
     fn every_panel_and_form_remains_clickable_in_compact_windows() {
-        for (width, height) in [(80, 24), (100, 28), (160, 48)] {
+        for (width, height) in [
+            (60, 10),
+            (80, 12),
+            (120, 16),
+            (180, 20),
+            (80, 24),
+            (100, 28),
+            (160, 48),
+        ] {
             let mut app = App::new("/test/project".into(), Config::default(), vec![]);
             crate::demo::populate(&mut app);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -1521,7 +1535,43 @@ mod tests {
                         .filter(|h| matches!(h.action, Action::Field(_)))
                         .all(|h| h.area.intersection(submit.area).is_empty())
                 );
+                assert!(
+                    ui.hits
+                        .iter()
+                        .all(|h| h.area.right() <= width && h.area.bottom() <= height)
+                );
             }
+        }
+    }
+
+    #[test]
+    fn short_empty_sessions_offer_mouse_wallet_creation() {
+        for (width, height) in [(60, 10), (120, 14), (180, 20)] {
+            let app = App::new("/test/project".into(), Config::default(), vec![]);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut ui = Ui::default();
+            terminal.draw(|f| ui.draw(f, &app)).unwrap();
+            for action in [Action::New, Action::Import, Action::Help, Action::Quit] {
+                assert!(ui.hits.iter().any(|hit| hit.action == action));
+            }
+        }
+    }
+
+    #[test]
+    fn resizing_switches_layout_without_losing_selection() {
+        let mut app = App::new("/test/project".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.transaction_cursor = 5;
+        let mut ui = Ui::default();
+        for (width, height) in [(160, 48), (120, 14), (60, 10), (160, 48)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|f| ui.draw(f, &app)).unwrap();
+            assert_eq!(app.transaction_cursor, 5);
+            assert!(
+                ui.hits
+                    .iter()
+                    .any(|hit| hit.action == Action::SelectTransaction(5))
+            );
         }
     }
 }

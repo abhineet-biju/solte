@@ -64,7 +64,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Expand focused panel | z, or the panel's + button |
 | Help / close dialog / quit | ? / Escape / q |
 
-Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. Narrow windows show the focused panel; the top navigation keeps every panel accessible. The minimum supported size is 80 columns by 24 rows; 120 by 36 or larger provides more room.
+Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. Narrow windows show the focused panel; the top navigation keeps every panel accessible. Short panes use a compact header, single-row wallet controls, and scrollable activity. Short dialogs show one field at a time with Previous and Next controls. The minimum supported size is 60 columns by 10 rows; 120 by 36 or larger provides more room. Below the minimum, Solte reports the actual column and row count.
 
 ## Local data and monitoring
 
