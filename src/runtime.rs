@@ -338,6 +338,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 | Action::RpcAirdrop
                 | Action::BrowserFaucet(_)
                 | Action::Send
+                | Action::ImportTransaction
                 | Action::Submit
         )
     {
@@ -346,6 +347,14 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
     match action {
         Action::New => app.open_form(FormKind::New),
         Action::Import => app.open_form(FormKind::Import),
+        Action::ImportTransaction => {
+            if services.offline {
+                bail!("Online simulation is required before signing imported transactions");
+            }
+            app.wallet()
+                .context("Create or import a signing wallet first")?;
+            app.open_form(FormKind::TransactionImport);
+        }
         Action::Fund | Action::Send => {
             if services.offline {
                 bail!("Offline: restart without --offline.");
@@ -684,10 +693,17 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
             let session = app.session;
             let store = services.store.clone();
             let sender = services.operation_sender.clone();
-            app.busy = Some("Signing and submitting transfer…".into());
-            services
-                .jobs
-                .spawn(operations::submit(*prepared, session, store, sender));
+            if prepared.export_path.is_some() {
+                app.busy = Some("Signing and exporting transaction…".into());
+                services
+                    .jobs
+                    .spawn(operations::sign_export(*prepared, session, sender));
+            } else {
+                app.busy = Some("Signing and submitting transaction…".into());
+                services
+                    .jobs
+                    .spawn(operations::submit(*prepared, session, store, sender));
+            }
         }
         return Ok(());
     }
@@ -740,10 +756,13 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                 ));
             } else {
                 let recipient = values[0].clone();
+                let format = values[2].parse::<crate::transaction::Format>()?;
                 app.busy = Some("Simulating transfer…".into());
                 services.jobs.spawn(async move {
-                    let update = match operations::prepare(&profile, &wallet, &recipient, lamports)
-                        .await
+                    let update = match operations::prepare_format(
+                        &profile, &wallet, &recipient, lamports, format,
+                    )
+                    .await
                     {
                         Ok(prepared) => {
                             if let Some(error) = &prepared.simulation_error {
@@ -766,6 +785,33 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                     let _ = sender.send(OperationEvent { session, update }).await;
                 });
             }
+        }
+        FormKind::TransactionImport => {
+            if services.offline {
+                bail!("Online simulation is required before signing imported transactions");
+            }
+            let wallet = app.wallet().context("No wallet selected")?.clone();
+            let profile = app.profile().clone();
+            let path = expand_path(&app.root, &PathBuf::from(&values[0]));
+            let export = if values[1] == "Sign & export" {
+                if values[2].is_empty() {
+                    bail!("Choose an export path");
+                }
+                Some(expand_path(&app.root, &PathBuf::from(&values[2])))
+            } else {
+                None
+            };
+            let session = app.session;
+            let sender = services.operation_sender.clone();
+            app.busy = Some("Decoding and simulating imported transaction…".into());
+            services.jobs.spawn(async move {
+                let update =
+                    match operations::prepare_import(&profile, &wallet, &path, export).await {
+                        Ok(prepared) => OperationUpdate::Prepared(Box::new(prepared)),
+                        Err(error) => OperationUpdate::Failed(network::safe_error(error, &profile)),
+                    };
+                let _ = sender.send(OperationEvent { session, update }).await;
+            });
         }
         FormKind::Profile => {
             let profile = RpcProfile::custom(&values[0], &values[1], &values[2])?;

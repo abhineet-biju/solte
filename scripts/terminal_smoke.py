@@ -2,6 +2,7 @@
 """Exercise Solte's actual keyboard and mouse input through a pseudo-terminal."""
 
 import argparse
+import base64
 import fcntl
 import json
 import os
@@ -22,6 +23,7 @@ def main():
     parser.add_argument("--binary", type=Path, default=Path("target/debug/solte"))
     parser.add_argument("--local-rpc", help="Optional loopback RPC to test funding and transfer")
     parser.add_argument("--local-ws", help="Matching loopback WebSocket endpoint")
+    parser.add_argument("--format", choices=["auto", "legacy", "v0", "v1"], default="auto")
     args = parser.parse_args()
     if args.local_rpc:
         from urllib.parse import urlparse
@@ -125,7 +127,7 @@ def main():
                 wait_for(lambda: balance(payer) >= 1_000_000_000)
                 drain(3)
                 send(b"s")
-                send(recipient.encode() + b"\t\x150.1\r", 2)
+                send(recipient.encode() + b"\t\x150.1\t" + b"\x1b[C" * ["auto", "legacy", "v0", "v1"].index(args.format) + b"\r", 2)
                 assert b"Review SOL transfer" in output
                 send(b"\r")
                 wait_for(lambda: balance(recipient) == 100_000_000)
@@ -135,6 +137,36 @@ def main():
                 send(b"\x1b[<0;10;13M", 1)
                 assert b"Transaction inspector" in output
                 send(b"\x1b")
+
+                payload = json.dumps({"jsonrpc":"2.0", "id":1, "method":"getLatestBlockhash", "params":[{"commitment":"confirmed"}]}).encode()
+                request = urllib.request.Request(args.local_rpc, payload, {"Content-Type":"application/json"})
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    blockhash = json.load(response)["result"]["value"]["blockhash"]
+                alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+                number = 0
+                for char in blockhash:
+                    number = number * 58 + alphabet.index(char)
+                hash_bytes = number.to_bytes(32, "big")
+                payer_bytes = bytes(json.loads(buyer.read_text())[32:])
+                recipient_bytes = bytes(json.loads(seller.read_text())[32:])
+                message = b"\x01\x00\x01\x03" + payer_bytes + recipient_bytes + bytes(32) + hash_bytes
+                message += b"\x01\x02\x02\x00\x01\x0c" + struct.pack("<IQ", 2, 100_000_000)
+                source = root / "import.base64"
+                destination = root / "signed.base64"
+                source.write_bytes(base64.b64encode(b"\x01" + bytes(64) + message))
+                send(b"I")
+                send(str(source).encode() + b"\t\t\x15" + str(destination).encode() + b"\r", 2)
+                assert b"Review imported transaction" in output
+                send(b"\r")
+                wait_for(destination.exists)
+                assert balance(recipient) == 100_000_000, "Export must not submit"
+                exported = base64.b64decode(destination.read_bytes())
+                assert exported[65:] == message, "Import must preserve the exact message"
+                assert exported[1:65] != bytes(64), "Export must include the selected signature"
+                send(b"I")
+                send(str(destination).encode() + b"\t\x1b[C\r", 2)
+                send(b"\r")
+                wait_for(lambda: balance(recipient) == 200_000_000)
             else:
                 send(b"p")
                 send(b"\x1b[B\r", 0.8)
@@ -160,7 +192,7 @@ def main():
             assert "reduced_motion = false" in (root / ".solte/config.toml").read_text()
             print("PASS: keyboard and mouse creation, settings persistence, and clean exit")
             if args.local_rpc:
-                print("PASS: TUI funding, simulation review, transfer, and mouse transaction inspection")
+                print(f"PASS: {args.format} TUI funding/transfer, inspection, import/export without submission, and imported submission")
         finally:
             if process.poll() is None:
                 process.terminate()

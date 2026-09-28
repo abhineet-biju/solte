@@ -302,6 +302,16 @@ impl Ui {
             );
         }
         let y = inner.bottom() - 1;
+        if app.view == View::Activity && inner.width >= 52 {
+            self.button(
+                frame,
+                Rect::new(inner.x + 37, y, 14, 1),
+                "Import tx [I]",
+                Action::ImportTransaction,
+                theme,
+                false,
+            );
+        }
         self.button(
             frame,
             Rect::new(inner.x, y, 10, 1),
@@ -356,21 +366,32 @@ impl Ui {
             .style(Style::default().fg(theme.muted)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        let prefix: String = field.value[..field.cursor]
-            .chars()
-            .rev()
-            .take(inner.width.saturating_sub(3) as usize)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        let field_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
-        frame.render_widget(
-            Paragraph::new(format!(" {prefix}▏{}", &field.value[field.cursor..]))
-                .style(theme.input(true)),
-            field_area,
-        );
-        self.target(field_area, Action::Field(form.active));
+        if !field.choices.is_empty() {
+            self.choice_field(
+                frame,
+                field,
+                form.active,
+                true,
+                Rect::new(inner.x, inner.y + 1, inner.width, 1),
+                theme,
+            );
+        } else {
+            let prefix: String = field.value[..field.cursor]
+                .chars()
+                .rev()
+                .take(inner.width.saturating_sub(3) as usize)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            let field_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
+            frame.render_widget(
+                Paragraph::new(format!(" {prefix}▏{}", &field.value[field.cursor..]))
+                    .style(theme.input(true)),
+                field_area,
+            );
+            self.target(field_area, Action::Field(form.active));
+        }
         if form.fields.len() > 1 {
             self.button(
                 frame,

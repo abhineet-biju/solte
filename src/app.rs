@@ -96,6 +96,7 @@ pub enum FormKind {
     Import,
     Fund,
     Transfer,
+    TransactionImport,
     Profile,
     Search,
     LogSearch,
@@ -123,6 +124,7 @@ pub enum Action {
     Import,
     Fund,
     Send,
+    ImportTransaction,
     Profiles,
     AddProfile,
     SelectProfile(usize),
@@ -147,6 +149,7 @@ pub enum Action {
     OpenSummary,
     Expand(Pane),
     Field(usize),
+    Choice(usize, i32),
     Scroll(i32),
     NextWallet,
 }
@@ -155,6 +158,7 @@ pub struct Field {
     pub label: &'static str,
     pub value: String,
     pub cursor: usize,
+    pub choices: &'static [&'static str],
 }
 
 impl Field {
@@ -163,9 +167,31 @@ impl Field {
             label,
             value: value.into(),
             cursor: value.len(),
+            choices: &[],
         }
     }
+    pub fn choice(label: &'static str, choices: &'static [&'static str]) -> Self {
+        let mut field = Self::new(label, choices[0]);
+        field.choices = choices;
+        field
+    }
+    pub fn cycle(&mut self, delta: i32) {
+        if self.choices.is_empty() {
+            return;
+        }
+        let index = self
+            .choices
+            .iter()
+            .position(|v| *v == self.value)
+            .unwrap_or(0) as i32;
+        self.value =
+            self.choices[(index + delta).rem_euclid(self.choices.len() as i32) as usize].into();
+        self.cursor = self.value.len();
+    }
     pub fn insert(&mut self, value: &str) {
+        if !self.choices.is_empty() {
+            return;
+        }
         let clean: String = value
             .chars()
             .filter(|c| !c.is_control())
@@ -210,6 +236,18 @@ impl Form {
             FormKind::Transfer => vec![
                 Field::new("Recipient address", ""),
                 Field::new("Amount · SOL", "0.1"),
+                Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
+            ],
+            FormKind::TransactionImport => vec![
+                Field::new("Transaction file · raw bytes or base64", ""),
+                Field::choice(
+                    "After review · [←]/[→] choose",
+                    &["Sign & export", "Sign & submit"],
+                ),
+                Field::new(
+                    "Export path · required for export",
+                    "signed-transaction.base64",
+                ),
             ],
             FormKind::Profile => vec![
                 Field::new("Profile name", ""),
@@ -232,6 +270,7 @@ impl Form {
             FormKind::Import => "Import existing keypair",
             FormKind::Fund => "Fund wallet",
             FormKind::Transfer => "Send SOL",
+            FormKind::TransactionImport => "Import transaction",
             FormKind::Profile => "Add RPC profile",
             FormKind::Search => "Filter transactions",
             FormKind::LogSearch => "Filter logs",
@@ -242,12 +281,30 @@ impl Form {
             FormKind::New => "Create wallet",
             FormKind::Import => "Import wallet",
             FormKind::Fund => "Request airdrop",
-            FormKind::Transfer => "Simulate & review",
+            FormKind::Transfer | FormKind::TransactionImport => "Simulate & review",
             FormKind::Profile => "Save profile",
             FormKind::Search | FormKind::LogSearch => "Apply filter",
         }
     }
     pub fn key(&mut self, key: KeyEvent) -> Option<Action> {
+        if !self.fields[self.active].choices.is_empty() {
+            match key.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.fields[self.active].cycle(-1);
+                    return None;
+                }
+                KeyCode::Right | KeyCode::Char('l' | ' ') => {
+                    self.fields[self.active].cycle(1);
+                    return None;
+                }
+                KeyCode::Char(_)
+                | KeyCode::Delete
+                | KeyCode::Backspace
+                | KeyCode::Home
+                | KeyCode::End => return None,
+                _ => {}
+            }
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('u') {
             self.fields[self.active].value.clear();
             self.fields[self.active].cursor = 0;
@@ -738,6 +795,7 @@ impl App {
             KeyCode::Char('i') => Some(Action::Import),
             KeyCode::Char('f') => Some(Action::Fund),
             KeyCode::Char('s') => Some(Action::Send),
+            KeyCode::Char('I') => Some(Action::ImportTransaction),
             KeyCode::Char('p') => Some(Action::Profiles),
             KeyCode::Char('r' | 'R') => Some(Action::Refresh),
             KeyCode::Char('t') => Some(Action::Theme),
@@ -818,6 +876,15 @@ impl App {
                 }
                 _ => return self.navigate(&Action::Move(delta)),
             },
+            Action::Choice(index, delta) => {
+                if let Some(Modal::Form(form)) = &mut self.modal
+                    && let Some(field) = form.fields.get_mut(index)
+                {
+                    field.cycle(delta);
+                    form.active = index;
+                    form.error = None;
+                }
+            }
             Action::Field(index) => {
                 if let Some(Modal::Form(form)) = &mut self.modal {
                     form.active = index.min(form.fields.len() - 1);

@@ -197,6 +197,39 @@ impl Ui {
         }
     }
 
+    fn choice_field(
+        &mut self,
+        frame: &mut Frame,
+        field: &crate::app::Field,
+        index: usize,
+        active: bool,
+        area: Rect,
+        theme: Theme,
+    ) {
+        let value_area = Rect::new(area.x, area.y, area.width.saturating_sub(12), 1);
+        frame.render_widget(
+            Paragraph::new(format!(" {}", field.value)).style(theme.input(active)),
+            value_area,
+        );
+        self.target(value_area, Action::Field(index));
+        self.button(
+            frame,
+            Rect::new(area.right() - 11, area.y, 5, 1),
+            "[←]",
+            Action::Choice(index, -1),
+            theme,
+            false,
+        );
+        self.button(
+            frame,
+            Rect::new(area.right() - 5, area.y, 5, 1),
+            "[→]",
+            Action::Choice(index, 1),
+            theme,
+            false,
+        );
+    }
+
     fn panel(
         &mut self,
         frame: &mut Frame,
@@ -735,6 +768,7 @@ impl Ui {
                     Cell::from(if record.error.is_some() { "×" } else { "✓" })
                         .style(Style::default().fg(color)),
                     Cell::from(short(&record.signature)),
+                    Cell::from(record.version_label()).style(Style::default().fg(theme.muted)),
                     Cell::from(record.activity(address)).style(Style::default().fg(color)),
                     Cell::from(delta).style(Style::default().fg(color)),
                     Cell::from(age).style(Style::default().fg(theme.muted)),
@@ -751,13 +785,14 @@ impl Ui {
             [
                 Constraint::Length(1),
                 Constraint::Min(10),
+                Constraint::Length(7),
                 Constraint::Percentage(22),
                 Constraint::Length(12),
                 Constraint::Length(6),
             ],
         )
         .header(
-            Row::new(["", "Signature", "Action", "Δ SOL", "Age"])
+            Row::new(["", "Signature", "Format", "Action", "Δ SOL", "Age"])
                 .style(Style::default().fg(theme.muted))
                 .bottom_margin(1),
         )
@@ -806,6 +841,16 @@ impl Ui {
                 theme,
                 false,
             );
+            if app.view == View::Activity && area.width >= 50 {
+                self.button(
+                    frame,
+                    Rect::new(area.x + 17, y, 14, 1),
+                    "Import tx [I]",
+                    Action::ImportTransaction,
+                    theme,
+                    false,
+                );
+            }
             if area.width > 34 {
                 self.button(
                     frame,
@@ -1217,7 +1262,13 @@ impl Ui {
             Modal::Log { .. } => "Log details",
             Modal::Wallet { .. } => "Wallet details",
             Modal::Inspect { .. } => "Transaction inspector",
-            Modal::Review { .. } => "Review SOL transfer",
+            Modal::Review { prepared, .. } => {
+                if prepared.imported {
+                    "Review imported transaction"
+                } else {
+                    "Review SOL transfer"
+                }
+            }
             Modal::Help { .. } => "Solte keyboard & mouse",
         };
         let block = Block::bordered()
@@ -1337,6 +1388,17 @@ impl Ui {
                         Rect::new(inner.x, y, inner.width, 1),
                     );
                     let active = index == form.active;
+                    if !field.choices.is_empty() {
+                        self.choice_field(
+                            frame,
+                            field,
+                            index,
+                            active,
+                            Rect::new(inner.x, y + 1, inner.width, 1),
+                            theme,
+                        );
+                        continue;
+                    }
                     let visible: String = field.value[..field.cursor]
                         .chars()
                         .rev()
@@ -1385,7 +1447,10 @@ impl Ui {
                         "References your existing file without copying its secret."
                     }
                     crate::app::FormKind::Transfer => {
-                        "Review the simulation before signing and submission."
+                        "Auto uses Legacy for SOL transfers. Explicit formats never silently fall back."
+                    }
+                    crate::app::FormKind::TransactionImport => {
+                        "Raw wire bytes or base64. Format and co-signatures are preserved. Export never submits."
                     }
                     crate::app::FormKind::Profile => {
                         "Profiles are stored locally in .solte/config.toml."
@@ -1599,9 +1664,26 @@ impl Ui {
             Modal::Review { prepared, scroll } => {
                 let mut lines = vec![
                     format!("From       {}", prepared.wallet.address),
-                    format!("To         {}", prepared.recipient),
+                    if prepared.imported {
+                        "Imported message · original bytes and co-signatures preserved".into()
+                    } else {
+                        format!("To         {}", prepared.recipient)
+                    },
                     format!("Network    {}", prepared.profile.name),
-                    format!("Amount     {} SOL", format_sol(prepared.lamports)),
+                    if prepared.imported {
+                        "Review every instruction and account below before signing.".into()
+                    } else {
+                        format!("Amount     {} SOL", format_sol(prepared.lamports))
+                    },
+                    format!(
+                        "Format     {}",
+                        crate::transaction::label(&prepared.transaction)
+                    ),
+                    prepared
+                        .export_path
+                        .as_ref()
+                        .map(|path| format!("Export     {} · NOT submitted", path.display()))
+                        .unwrap_or_else(|| "Action     Sign and submit".into()),
                     format!("Fee        {} SOL", format_sol(prepared.fee)),
                     format!(
                         "Compute    {}",
@@ -1621,12 +1703,21 @@ impl Ui {
                     String::new(),
                 ];
                 lines.extend(prepared.logs.iter().map(|s| clean_text(s)));
+                lines.push(String::new());
+                lines.extend(crate::transaction::review_lines(
+                    &prepared.transaction,
+                    &prepared.accounts,
+                ));
                 self.inspection_body(frame, inner, lines, *scroll, theme);
                 if prepared.simulation_error.is_none() {
                     self.button(
                         frame,
                         Rect::new(inner.x, inner.bottom() - 1, 26.min(inner.width), 1),
-                        "Sign & submit [Enter]",
+                        if prepared.export_path.is_some() {
+                            "Sign & export [Enter]"
+                        } else {
+                            "Sign & submit [Enter]"
+                        },
                         Action::Submit,
                         theme,
                         false,
@@ -1654,6 +1745,9 @@ impl Ui {
                     "Log details: [s] copies signature; [o] opens Explorer when available",
                     "Wallets: [Enter]/click opens details; confirm to use wallet",
                     "[f] Funding options   [s] Review and send SOL",
+                    "[I] Import transaction · raw wire bytes or base64",
+                    "Send format: Auto / Legacy / v0 / v1 via field arrows",
+                    "Import: preserve format and signatures; export or submit",
                     "[p] RPC profiles      [r]/[R] Refresh state",
                     "Refresh shows progress, then success or failure.",
                     "Offline refresh reloads cached history only.",
@@ -1870,6 +1964,42 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn format_and_import_choices_work_with_mouse_and_keyboard_at_small_sizes() {
+        for (kind, index, next) in [
+            (crate::app::FormKind::Transfer, 2, "Legacy"),
+            (crate::app::FormKind::TransactionImport, 1, "Sign & submit"),
+        ] {
+            for (width, height) in [(60, 10), (90, 22), (140, 42)] {
+                let mut app = App::new("/test".into(), Config::default(), vec![]);
+                app.open_form(kind);
+                if let Some(Modal::Form(form)) = &mut app.modal {
+                    form.active = index;
+                }
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                let hit = ui
+                    .hits
+                    .iter()
+                    .find(|h| h.action == Action::Choice(index, 1))
+                    .unwrap()
+                    .area;
+                let action = ui.click(&mut app, hit.x, hit.y).unwrap();
+                app.navigate(&action);
+                if let Some(Modal::Form(form)) = &app.modal {
+                    assert_eq!(form.fields[index].value, next);
+                }
+                app.key(crossterm::event::KeyEvent::from(
+                    crossterm::event::KeyCode::Left,
+                ));
+                if let Some(Modal::Form(form)) = &app.modal {
+                    assert_eq!(form.fields[index].value, form.fields[index].choices[0]);
+                }
+            }
+        }
     }
 
     #[test]
