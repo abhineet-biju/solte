@@ -571,12 +571,26 @@ async fn refresh(
         .map(|r| r.signature)
         .collect();
     let mut results = stream::iter(missing)
-        .map(|signature| async move { fetch_detail(rpc, &signature).await })
+        .map(|signature| async move {
+            let result = fetch_detail(rpc, &signature).await;
+            (signature, result)
+        })
         .buffer_unordered(3);
-    while let Some(result) = results.next().await {
-        if let Ok(Some(record)) = result {
-            dirty.insert(record.signature.clone());
-            records.insert(record.signature.clone(), record);
+    while let Some((signature, result)) = results.next().await {
+        match result {
+            Ok(Some(record)) => {
+                dirty.insert(record.signature.clone());
+                records.insert(record.signature.clone(), record);
+            }
+            Err(error) => {
+                let message = safe_error(error, profile);
+                if let Some(record) = records.get_mut(&signature) {
+                    record.detail_failure(&message);
+                    dirty.insert(signature.clone());
+                }
+                warnings.push(format!("Details unavailable for {signature}: {message}"));
+            }
+            _ => {}
         }
     }
     let saved = sorted(records);
@@ -620,7 +634,7 @@ pub async fn fetch_detail(rpc: &RpcClient, signature: &str) -> Result<Option<Tra
             RpcTransactionConfig {
                 encoding: Some(UiTransactionEncoding::JsonParsed),
                 commitment: Some(CommitmentConfig::confirmed()),
-                max_supported_transaction_version: Some(0),
+                max_supported_transaction_version: Some(1),
             },
         )
         .await?;

@@ -13,6 +13,19 @@ pub struct TransactionRecord {
 }
 
 impl TransactionRecord {
+    pub fn version_label(&self) -> String {
+        match self.details.as_ref().and_then(|d| d.get("version")) {
+            Some(Value::String(value)) if value == "legacy" => "Legacy".into(),
+            Some(Value::Number(value)) => format!("v{value}"),
+            _ => "Unknown".into(),
+        }
+    }
+
+    pub fn detail_failure(&mut self, message: &str) {
+        let details = self.details.get_or_insert_with(|| serde_json::json!({}));
+        details["_solteDetailError"] = message.into();
+    }
+
     pub fn fee(&self) -> Option<u64> {
         self.details.as_ref()?.pointer("/meta/fee")?.as_u64()
     }
@@ -82,6 +95,7 @@ impl TransactionRecord {
         let mut lines = vec![
             format!("Signature  {}", self.signature),
             format!("Slot       {}", self.slot),
+            format!("Format     {}", self.version_label()),
         ];
         if let Some(error) = &self.error {
             lines.push(format!("Error      {}", clean_text(error)));
@@ -90,6 +104,9 @@ impl TransactionRecord {
             lines.push(format!("Fee        {} SOL", format_sol(fee)));
         }
         if let Some(value) = &self.details {
+            if let Some(error) = value.get("_solteDetailError").and_then(Value::as_str) {
+                lines.push(format!("Details unavailable: {}", clean_text(error)));
+            }
             if let Some(units) = value
                 .pointer("/meta/computeUnitsConsumed")
                 .and_then(Value::as_u64)
@@ -100,6 +117,15 @@ impl TransactionRecord {
             lines.push("PROGRAM LOGS".into());
             lines.extend(self.log_lines());
             for (title, pointer) in [
+                (
+                    "V1 RESOURCE CONFIG",
+                    "/transaction/message/transactionConfig",
+                ),
+                ("ACCOUNTS", "/transaction/message/accountKeys"),
+                (
+                    "ADDRESS LOOKUP TABLES",
+                    "/transaction/message/addressTableLookups",
+                ),
                 ("INSTRUCTIONS", "/transaction/message/instructions"),
                 ("INNER INSTRUCTIONS", "/meta/innerInstructions"),
                 ("TOKEN BALANCES BEFORE", "/meta/preTokenBalances"),

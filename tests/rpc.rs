@@ -25,6 +25,10 @@ impl Drop for MockRpc {
 }
 
 async fn server(genesis: &'static str) -> MockRpc {
+    server_with_version(genesis, json!("legacy")).await
+}
+
+async fn server_with_version(genesis: &'static str, version: Value) -> MockRpc {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -32,6 +36,7 @@ async fn server(genesis: &'static str) -> MockRpc {
     let task = tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let saved = saved.clone();
+            let version = version.clone();
             tokio::spawn(async move {
                 let mut data = Vec::new();
                 let mut buffer = [0u8; 4096];
@@ -65,6 +70,15 @@ async fn server(genesis: &'static str) -> MockRpc {
                 saved.lock().unwrap().push(request.clone());
                 let value = match request["method"].as_str().unwrap() {
                     "getGenesisHash" => json!(genesis),
+                    "getTransaction" => json!({
+                        "slot": 42, "blockTime": 1, "version": version,
+                        "transaction": {"signatures": [request["params"][0]], "message": {
+                            "accountKeys": [{"pubkey":"11111111111111111111111111111111","writable":true,"signer":true,"source":"transaction"}],
+                            "recentBlockhash":"11111111111111111111111111111111", "instructions":[],
+                            "transactionConfig":{"computeUnitLimit":1000,"loadedAccountsDataSizeLimit":32768}
+                        }},
+                        "meta":{"err":null,"status":{"Ok":null},"fee":5000,"preBalances":[10000],"postBalances":[5000],"logMessages":["Program success"]}
+                    }),
                     "getBlockHeight" => json!(201),
                     "getVersion" => json!({"solana-core":"3.1.0","feature-set":1}),
                     "getLatestBlockhash" => {
@@ -214,6 +228,34 @@ async fn submission_rejects_failed_expired_and_changed_network_reviews() {
                 .unwrap()
                 .iter()
                 .any(|r| r["method"] == "sendTransaction")
+        );
+    }
+}
+
+#[tokio::test]
+async fn reads_legacy_v0_and_v1_metadata_with_explicit_version_opt_in() {
+    for (version, label) in [
+        (json!("legacy"), "Legacy"),
+        (json!(0), "v0"),
+        (json!(1), "v1"),
+    ] {
+        let mock = server_with_version(solte::network::DEVNET_GENESIS, version).await;
+        let signature = solana_signature::Signature::from([3; 64]).to_string();
+        let record = solte::network::fetch_detail(&client(&mock.profile), &signature)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.version_label(), label);
+        assert_eq!(record.fee(), Some(5000));
+        assert!(
+            record
+                .inspection_lines()
+                .iter()
+                .any(|line| line.contains("computeUnitLimit"))
+        );
+        assert_eq!(
+            mock.requests.lock().unwrap()[0]["params"][1]["maxSupportedTransactionVersion"],
+            1
         );
     }
 }
