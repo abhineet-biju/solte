@@ -141,7 +141,7 @@ See [key-handling practices](key-handling.md) for memory lifetime, file permissi
 
 Manual refresh displays a spinner while pending and a success check or failure indicator for four seconds after completion. Reduced motion keeps progress text static. Offline refresh reloads cached history; demo data does not issue RPC requests. Repeat refresh presses are coalesced while a request is pending.
 
-Appearance includes Ember, Glacier, Orchid, and Neon. Neon uses a navy background, cyan headings, magenta focus, and mint balances. Choose it with `t` or launch with `solte --theme neon`. Theme selection changes colors only.
+Neon is the default theme for new projects. Existing saved theme preferences are preserved. Appearance also includes Ember, Glacier, and Orchid. Neon uses a navy background, cyan headings, magenta focus, and mint balances. Choose it with `t` or launch with `solte --theme neon`. Theme selection changes colors only.
 
 Terminal font zoom is handled as a change in available character columns and rows. Layouts reflow at their breakpoints, preserve view/selection state, and rebuild click targets. Below 60 × 10, Solte shows a size hint and recovers when enlarged; it cannot fit the complete interface below that minimum.
 

@@ -335,12 +335,8 @@ impl Ui {
         ];
         frame.render_widget(Paragraph::new(mark), Rect::new(area.x + 1, area.y, 20, 3));
         frame.render_widget(
-            Paragraph::new(if app.demo {
-                "SOLTE · DEMO"
-            } else {
-                "SOLTE · DEVELOPMENT WALLET"
-            })
-            .style(Style::default().fg(theme.text).bold()),
+            Paragraph::new(if app.demo { "DEMO" } else { "" })
+                .style(Style::default().fg(theme.text).bold()),
             Rect::new(area.x + 24, area.y, area.width.saturating_sub(51), 1),
         );
         if app.view != View::Overview {
@@ -2540,9 +2536,10 @@ mod tests {
         for (width, height) in [(60, 10), (100, 20), (160, 48)] {
             for kind in [Appearance::Theme, Appearance::Motion] {
                 let mut app = App::new("/test".into(), Config::default(), vec![]);
+                let original = kind.current(&app.config);
                 app.modal = Some(Modal::Appearance { kind, selected: 0 });
                 app.navigate(&Action::Scroll(1));
-                assert_eq!(kind.current(&app.config), 0);
+                assert_eq!(kind.current(&app.config), original);
                 let mut ui = Ui::default();
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
@@ -2560,7 +2557,7 @@ mod tests {
                 );
                 app.navigate(&Action::Close);
                 assert!(app.modal.is_none());
-                assert_eq!(kind.current(&app.config), 0);
+                assert_eq!(kind.current(&app.config), original);
             }
         }
     }

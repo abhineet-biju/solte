@@ -111,9 +111,9 @@ def main():
             assert b"\x1b]52;" in output, "Copy must emit an OSC 52 clipboard request"
             send(b"t")
             assert b"Choose theme" in output
-            send(b"j\x1b")
+            send(b"k\x1b")
             assert "glacier" not in (root / ".solte/config.toml").read_text()
-            send(b"tj\r")
+            send(b"tkk\r")
             send(b"tjj\r")
             send(b"m")
             assert b"Choose motion" in output

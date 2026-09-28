@@ -89,7 +89,7 @@ impl Default for Config {
             selected_profile: 0,
             selected_wallet: None,
             wallets: Vec::new(),
-            theme: "ember".into(),
+            theme: "neon".into(),
             reduced_motion: false,
         }
     }
