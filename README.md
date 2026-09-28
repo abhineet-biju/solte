@@ -58,17 +58,17 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Activate the focused option | Enter |
 | Create / import / cycle identity | n / i / ] |
 | Funding options / send SOL | f / s |
-| RPC profiles / refresh | p / r |
+| RPC profiles / refresh | p / r or R |
 | Search current Transactions or Logs view / transaction failures | / / e |
 | Fetch or load older records | b |
 | Open transaction explorer / copy wallet address | o / y |
 | Clear transaction search | x |
 | Follow logs / clear visible logs | F / C |
 | Choose theme / motion | t / m |
-| Open focused summary / return to Overview | z, or Open → |
+| Open focused summary / return to Overview | z |
 | Help / close dialog / quit | ? / Escape / q |
 
-The top bar switches between distinct views. Overview combines wallet, activity, network, and log summaries; Wallets, Transactions, Network, and Logs use the workspace for their own content. Overview's Open → links lead to the corresponding full view. At narrower widths Overview reduces the number of summaries while all five views remain accessible. The minimum size is 60 columns by 10 rows.
+The top bar switches between distinct views. Overview combines wallet, activity, network, and log summaries; Wallets, Transactions, Network, and Logs use the workspace for their own content. Use the main tabs or z to visit a summary’s full view. At narrower widths Overview reduces the number of summaries while all five views remain accessible. The minimum size is 60 columns by 10 rows.
 
 The highlighted control has keyboard focus. Left/right arrows switch main views directly. Use k/up at the top of a page to reach the view selector, h/l to switch views there, and j/down or Enter to enter the page. In dialogs, left/right do not change the underlying view; in text fields they move the cursor. Tab and Shift-Tab move between visible focus regions without changing views. Clicks and Enter invoke the same actions. Forms accept normal text input, arrow keys move the cursor, and Tab switches fields. Each view preserves its navigation state; Transactions and Logs have separate search filters.
 
@@ -132,3 +132,5 @@ Interaction styling is shared across all themes: a solid accent background marks
 Overview retains all four summaries from 80 columns by 20 rows, keeping Wallets on the left and Network on the right. Narrower sidebars and wrapped wallet actions preserve the same arrangement when zooming. Smaller windows prioritize a usable summary and keep every full view accessible. Transactions is abbreviated to Txns in the narrowest tab bar; `--view transactions` also accepts the previous `activity` spelling.
 
 See [key-handling practices](docs/key-handling.md) for memory lifetime, file permissions, and the limits of development-key protection.
+
+Manual refresh displays a spinner while pending and a success check or failure indicator for four seconds after completion. Reduced motion keeps progress text static. Offline refresh reloads cached history; demo data does not issue RPC requests. Repeat refresh presses are coalesced while a request is pending.

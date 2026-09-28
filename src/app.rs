@@ -345,6 +345,17 @@ pub enum Modal {
     },
 }
 
+#[derive(Default)]
+pub enum RefreshState {
+    #[default]
+    Idle,
+    Pending(Instant),
+    Finished {
+        at: Instant,
+        success: bool,
+    },
+}
+
 pub struct App {
     pub root: PathBuf,
     pub config: Config,
@@ -361,6 +372,7 @@ pub struct App {
     pub filter: String,
     pub failures_only: bool,
     pub history_loading: bool,
+    pub refresh: RefreshState,
     pub offline: bool,
     pub modal_scroll_limit: u16,
     pub logs: VecDeque<LogEntry>,
@@ -404,6 +416,7 @@ impl App {
             filter: String::new(),
             failures_only: false,
             history_loading: false,
+            refresh: RefreshState::Idle,
             offline: false,
             modal_scroll_limit: 0,
             logs: VecDeque::new(),
@@ -423,6 +436,49 @@ impl App {
             session: 0,
             demo: false,
         }
+    }
+
+    pub fn refresh_label(&self) -> String {
+        match self.refresh {
+            RefreshState::Pending(started) => {
+                if self.config.reduced_motion {
+                    "Refreshing…".into()
+                } else {
+                    format!(
+                        "Refreshing {}",
+                        ['|', '/', '-', '\\'][(started.elapsed().as_millis() / 120 % 4) as usize]
+                    )
+                }
+            }
+            RefreshState::Finished { at, success } if at.elapsed().as_secs() < 4 => {
+                if success {
+                    "Refreshed ✓".into()
+                } else {
+                    "Failed ! r".into()
+                }
+            }
+            _ => "Refresh r".into(),
+        }
+    }
+
+    pub fn finish_refresh(&mut self, result: Result<(), String>) {
+        self.refresh = RefreshState::Finished {
+            at: Instant::now(),
+            success: result.is_ok(),
+        };
+        let (level, message) = match result {
+            Ok(()) => (
+                "INFO",
+                if self.offline {
+                    "Cached history reloaded".into()
+                } else {
+                    "RPC and wallet state refreshed".into()
+                },
+            ),
+            Err(message) => ("WARN", format!("Refresh failed: {message}")),
+        };
+        self.status = message.clone();
+        self.log(level, message);
     }
 
     pub fn switch_view(&mut self, view: View) {
@@ -594,7 +650,7 @@ impl App {
             KeyCode::Char('f') => Some(Action::Fund),
             KeyCode::Char('s') => Some(Action::Send),
             KeyCode::Char('p') => Some(Action::Profiles),
-            KeyCode::Char('r') => Some(Action::Refresh),
+            KeyCode::Char('r' | 'R') => Some(Action::Refresh),
             KeyCode::Char('t') => Some(Action::Theme),
             KeyCode::Char('m') => Some(Action::Motion),
             KeyCode::Char('o') => Some(Action::ExplorerTransaction),
@@ -680,10 +736,17 @@ impl App {
             Action::Follow => {
                 self.follow = !self.follow;
                 self.log_scroll = 0;
+                self.status = if self.follow {
+                    "Following live logs"
+                } else {
+                    "Log follow paused"
+                }
+                .into();
             }
             Action::ClearLogs => {
                 self.logs.clear();
                 self.log_scroll = 0;
+                self.status = "Visible session log cleared".into();
             }
             Action::ClearFilter => {
                 if self.view == View::Logs {
@@ -741,6 +804,29 @@ fn move_index(index: usize, delta: i32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refresh_feedback_covers_pending_completion_error_and_reduced_motion() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        app.refresh = RefreshState::Pending(Instant::now());
+        assert!(app.refresh_label().starts_with("Refreshing"));
+        app.config.reduced_motion = true;
+        assert_eq!(app.refresh_label(), "Refreshing…");
+        app.finish_refresh(Ok(()));
+        assert_eq!(app.refresh_label(), "Refreshed ✓");
+        assert!(app.status.contains("RPC"));
+        app.offline = true;
+        app.finish_refresh(Ok(()));
+        assert_eq!(app.status, "Cached history reloaded");
+        app.finish_refresh(Err("RPC unreachable".into()));
+        assert_eq!(app.refresh_label(), "Failed ! r");
+        assert!(app.status.contains("RPC unreachable"));
+        app.refresh = RefreshState::Finished {
+            at: Instant::now() - std::time::Duration::from_secs(5),
+            success: true,
+        };
+        assert_eq!(app.refresh_label(), "Refresh r");
+    }
 
     #[test]
     fn horizontal_arrows_switch_views_but_remain_local_in_dialogs() {

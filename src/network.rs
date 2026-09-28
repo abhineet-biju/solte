@@ -35,6 +35,7 @@ pub const DEVNET_GENESIS: &str = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 pub enum Update {
     Records(Vec<TransactionRecord>),
     HistoryFinished(Result<usize, String>),
+    RefreshFinished(Result<(), String>),
     Network(NetworkState, Option<u64>),
     Offline(String),
     Subscription(bool),
@@ -49,6 +50,7 @@ pub struct Event {
 
 pub enum Command {
     Refresh,
+    RefreshRequested,
     Older,
     Detail(String),
 }
@@ -197,11 +199,22 @@ async fn run(
                         .map(|record| (record.signature.clone(), record))
                         .collect();
                     emit(&sender, session, Update::Records(loaded)).await;
+                    if matches!(command, Command::RefreshRequested) {
+                        emit(&sender, session, Update::RefreshFinished(Ok(()))).await;
+                    }
                     if matches!(command, Command::Older) {
                         emit(&sender, session, Update::HistoryFinished(Ok(added))).await;
                     }
                 }
                 Err(error) => {
+                    if matches!(command, Command::RefreshRequested) {
+                        emit(
+                            &sender,
+                            session,
+                            Update::RefreshFinished(Err(error.to_string())),
+                        )
+                        .await;
+                    }
                     if matches!(command, Command::Older) {
                         emit(
                             &sender,
@@ -330,6 +343,9 @@ async fn run(
                 last_error.clear();
                 emit(&sender, session, Update::Network(network, balance)).await;
                 emit(&sender, session, Update::Records(sorted(&records))).await;
+                if matches!(command, Command::RefreshRequested) {
+                    emit(&sender, session, Update::RefreshFinished(Ok(()))).await;
+                }
                 if matches!(command, Command::Older) {
                     let added = records
                         .keys()
@@ -352,6 +368,14 @@ async fn run(
                     _ => "RPC refresh timed out; retaining captured records".into(),
                 };
                 emit(&sender, session, Update::Offline(message.clone())).await;
+                if matches!(command, Command::RefreshRequested) {
+                    emit(
+                        &sender,
+                        session,
+                        Update::RefreshFinished(Err(message.clone())),
+                    )
+                    .await;
+                }
                 if matches!(command, Command::Older) {
                     emit(
                         &sender,
@@ -707,6 +731,42 @@ pub fn explorer_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn explicit_refresh_reports_success_offline_and_failure_online() {
+        for offline in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let store = Store::open(temp.path()).unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            drop(listener);
+            let profile = RpcProfile::custom(
+                "Test",
+                &format!("http://127.0.0.1:{port}"),
+                &format!("ws://127.0.0.1:{port}"),
+            )
+            .unwrap();
+            let (sender, mut receiver) = mpsc::channel(32);
+            let monitor = start(7, None, profile, store, sender, offline);
+            monitor
+                .commands
+                .send(Command::RefreshRequested)
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let event = receiver.recv().await.unwrap();
+                    if let Update::RefreshFinished(result) = event.update {
+                        assert_eq!(event.session, 7);
+                        assert_eq!(result.is_ok(), offline);
+                        break;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn older_cached_history_reports_added_records_and_exhaustion() {

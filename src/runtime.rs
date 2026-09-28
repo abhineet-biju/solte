@@ -17,7 +17,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
     amount::parse_sol,
-    app::{Action, App, Appearance, FormKind, Modal, Pane},
+    app::{Action, App, Appearance, FormKind, Modal, Pane, RefreshState},
     config::{RpcProfile, WalletRef, expand_path},
     funding::{self, Faucet},
     network::{self, Command, Monitor, Update},
@@ -51,6 +51,7 @@ impl Services {
         app.session += 1;
         app.records.clear();
         app.history_loading = false;
+        app.refresh = RefreshState::Idle;
         app.transaction_cursor = 0;
         app.balance = None;
         app.network = None;
@@ -199,6 +200,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
             Some(event) = network_receiver.recv() => {
                 if event.session != app.session { continue; }
                 match event.update {
+                    Update::RefreshFinished(result) => app.finish_refresh(result),
                     Update::Records(records) => app.replace_records(records),
                     Update::HistoryFinished(result) => {
                         app.history_loading = false;
@@ -211,7 +213,9 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                         app.log(level, message);
                     },
                     Update::Network(network, balance) => {
-                        app.status = format!("{} · confirmed activity · captured history stored locally", network.cluster);
+                        if !matches!(app.refresh, RefreshState::Pending(_)) {
+                            app.status = format!("{} · confirmed activity · captured history stored locally", network.cluster);
+                        }
                         app.network = Some(network); app.balance = balance; app.connected = true; app.last_update = Some(Instant::now());
                     },
                     Update::Offline(message) => { app.connected = false; app.status = message; },
@@ -257,7 +261,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
             Some(result) = services.jobs.join_next(), if !services.jobs.is_empty() => {
                 if let Err(error) = result { app.busy = None; report_error(&mut app, format!("Background task stopped: {error}")); }
             },
-            _ = animation_tick.tick(), if ui.animating() => {},
+            _ = animation_tick.tick(), if ui.animating() || (!app.config.reduced_motion && matches!(app.refresh, RefreshState::Pending(_))) => {},
             _ = status_tick.tick() => {},
         }
         if redraw {
@@ -448,7 +452,28 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 services.save(app).await;
             }
         }
-        Action::Refresh => services.command(Command::Refresh),
+        Action::Refresh => {
+            if matches!(app.refresh, RefreshState::Pending(_)) {
+                return Ok(false);
+            }
+            if app.demo {
+                app.status = "Demo data is fixed; no RPC request was sent".into();
+            } else if services
+                .monitor
+                .as_ref()
+                .is_some_and(|monitor| monitor.commands.try_send(Command::RefreshRequested).is_ok())
+            {
+                app.refresh = RefreshState::Pending(Instant::now());
+                app.status = if services.offline {
+                    "Reloading cached history…"
+                } else {
+                    "Refreshing RPC and wallet state…"
+                }
+                .into();
+            } else {
+                app.finish_refresh(Err("Worker unavailable or busy; try again".into()));
+            }
+        }
         Action::Older => {
             app.switch_view(crate::app::View::Activity);
             app.pane = Pane::Wallet;

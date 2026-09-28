@@ -272,7 +272,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-            "Refresh r",
+            &app.refresh_label(),
             Action::Refresh,
             theme,
             false,

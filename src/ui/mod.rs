@@ -196,15 +196,6 @@ impl Ui {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         self.target(area, Action::Focus(pane));
-        if app.view == View::Overview && area.width >= 14 && area.height >= 2 {
-            self.border_button(
-                frame,
-                Rect::new(area.right() - 9, area.bottom() - 1, 7, 1),
-                "Open →",
-                Action::Expand(pane),
-                theme,
-            );
-        }
         inner
     }
 
@@ -946,7 +937,7 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x + 20, inner.bottom() - 1, 13, 1),
-            "Refresh r",
+            &app.refresh_label(),
             Action::Refresh,
             theme,
             false,
@@ -1515,7 +1506,7 @@ impl Ui {
                     "NAVIGATION",
                     "Tab / Shift-Tab       Focus regions in this view",
                     "1–5                   Overview / Wallets / Transactions / Network / Logs",
-                    "Left / Right          Previous / next main view",
+                    "Left / Right          Previous / next main view (outside dialogs)",
                     "h j k l / Up / Down    Navigate inside the focused panel",
                     "k at the top          Focus the main panel selector",
                     "h/l in selector       Switch view; j/Enter enters it",
@@ -1526,10 +1517,13 @@ impl Ui {
                     "n  New keypair         i  Import keypair",
                     "]  Cycle identity     y  Copy selected wallet address",
                     "f  Request funding    s  Simulate and review a SOL transfer",
-                    "p  RPC profiles       r  Refresh current view",
+                    "p  RPC profiles       r/R  Refresh RPC and wallet state",
+                    "Refresh shows progress, then success or failure.",
+                    "Offline refresh reloads cached history only.",
                     "",
                     "HISTORY",
-                    "/  Filter   x Clear   e  Show failures only",
+                    "/  Search Transactions or Logs; x clears its search",
+                    "e  Open Transactions and toggle failures only",
                     "b  Fetch older        o  Open selected transaction in explorer",
                     "F  Follow logs        C  Clear visible session log",
                     "",
@@ -1541,8 +1535,16 @@ impl Ui {
                     "transaction rows to inspect. Buttons and form fields",
                     "are clickable. Use the wheel to scroll lists or logs.",
                     "",
-                    "In text fields, type normally; arrows move the cursor.",
-                    "Tab changes fields. Esc closes a dialog. q quits.",
+                    "DIALOGS AND FORMS",
+                    "In text fields, type normally; left/right moves the cursor.",
+                    "Tab/Shift-Tab changes fields or menu choices.",
+                    "j/k or Up/Down selects menu choices; Enter applies.",
+                    "Enter submits forms. Esc cancels and preserves the page.",
+                    "Inspectors: j/k, Page Up/Down, Home/End scroll details.",
+                    "Inspector y copies the signature; o opens its explorer.",
+                    "q closes menus/help; outside a dialog it quits Solte.",
+                    "F and C are uppercase. Other letter shortcuts are lowercase",
+                    "unless an uppercase alternative is shown.",
                     "Ctrl-C exits everywhere.",
                     "Public Devnet history can be incomplete. Solte preserves",
                     "records it captured; it cannot recover pruned records.",
