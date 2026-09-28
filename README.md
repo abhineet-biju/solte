@@ -48,10 +48,11 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 
 | Action | Keys |
 |---|---|
-| Move focus | Tab / Shift-Tab, or h / l and left / right |
+| Switch panels | Tab / Shift-Tab |
 | Jump to wallets / activity / network / logs | 1 / 2 / 3 / 4 |
-| Move selection or scroll | j / k, up / down, Page Up / Page Down |
-| Select or inspect | Enter |
+| Navigate options within the focused panel | h / j / k / l, or arrow keys |
+| Scroll the current list or view | Page Up / Page Down |
+| Activate the focused option | Enter |
 | Create / import / cycle identity | n / i / ] |
 | Fund / send SOL | f / s |
 | RPC profiles / refresh | p / r |
@@ -65,6 +66,8 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Help / close dialog / quit | ? / Escape / q |
 
 Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. Narrow windows show the focused panel; the top navigation keeps every panel accessible. Short panes use a compact header, single-row wallet controls, and scrollable activity. Short dialogs show one field at a time with Previous and Next controls. The minimum supported size is 60 columns by 10 rows; 120 by 36 or larger provides more room. Below the minimum, Solte reports the actual column and row count.
+
+The underlined control has keyboard focus. Directional navigation stays inside the selected panel; Enter activates the same action as a mouse click. In text fields, type normally, use left/right to move the cursor, and Tab/Shift-Tab to change fields.
 
 ## Local data and monitoring
 

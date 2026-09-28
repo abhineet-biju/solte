@@ -154,7 +154,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 let action = match event? {
                     Event::Key(key) if key.kind != KeyEventKind::Release => app.key(key),
                     Event::Mouse(mouse) => match mouse.kind {
-                        MouseEventKind::Down(MouseButton::Left) => ui.hit(mouse.column, mouse.row),
+                        MouseEventKind::Down(MouseButton::Left) => ui.click(&mut app, mouse.column, mouse.row),
                         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                             if app.modal.is_none() && let Some(action) = ui.hits.iter().find(|h| h.area.contains((mouse.column, mouse.row).into()) && matches!(h.action, Action::Focus(_))).map(|h| h.action.clone()) { app.navigate(&action); }
                             Some(Action::Scroll(if mouse.kind == MouseEventKind::ScrollUp { -3 } else { 3 }))
@@ -164,6 +164,11 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     Event::Paste(text) => { app.paste(&text); None },
                     Event::Resize(..) => None,
                     _ => { redraw = false; None },
+                };
+                let action = match action {
+                    Some(Action::Navigate(direction)) => { ui.navigate_control(&mut app, direction); None },
+                    Some(Action::Activate) if app.modal.is_none() => ui.focused_action(&app).or(Some(Action::Activate)),
+                    other => other,
                 };
                 if let Some(action) = action {
                     let animate = matches!(action, Action::Focus(_) | Action::CycleFocus(_) | Action::SetTab(_) | Action::Theme | Action::New | Action::Import | Action::Inspect | Action::SelectTransaction(_));

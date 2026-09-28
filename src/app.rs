@@ -37,6 +37,14 @@ pub enum Tab {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Down,
+    Up,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FormKind {
     New,
     Import,
@@ -52,6 +60,7 @@ pub enum Action {
     Quit,
     Focus(Pane),
     CycleFocus(bool),
+    Navigate(Direction),
     Move(i32),
     Activate,
     SelectWallet(usize),
@@ -249,6 +258,7 @@ pub struct App {
     pub selected_wallet: usize,
     pub wallet_cursor: usize,
     pub pane: Pane,
+    pub focused_control: Option<Action>,
     pub tab: Tab,
     pub records: Vec<TransactionRecord>,
     pub transaction_cursor: usize,
@@ -286,6 +296,7 @@ impl App {
             selected_wallet,
             wallet_cursor: selected_wallet,
             pane: Pane::Wallet,
+            focused_control: None,
             tab: Tab::Overview,
             records: Vec::new(),
             transaction_cursor: 0,
@@ -359,6 +370,9 @@ impl App {
         self.transaction_cursor = selected
             .and_then(|s| self.visible_records().iter().position(|r| r.signature == s))
             .unwrap_or(0);
+        if matches!(self.focused_control, Some(Action::SelectTransaction(_))) {
+            self.focused_control = Some(Action::SelectTransaction(self.transaction_cursor));
+        }
     }
     pub fn open_form(&mut self, kind: FormKind) {
         self.modal = Some(Modal::Form(Form::new(kind, self.wallets.len() + 1)));
@@ -403,12 +417,12 @@ impl App {
             KeyCode::Char('2') => Some(Action::Focus(Pane::Wallet)),
             KeyCode::Char('3') => Some(Action::Focus(Pane::Network)),
             KeyCode::Char('4') => Some(Action::Focus(Pane::Logs)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Action::Move(1)),
-            KeyCode::Up | KeyCode::Char('k') => Some(Action::Move(-1)),
+            KeyCode::Down | KeyCode::Char('j' | 'J') => Some(Action::Navigate(Direction::Down)),
+            KeyCode::Up | KeyCode::Char('k' | 'K') => Some(Action::Navigate(Direction::Up)),
             KeyCode::PageDown => Some(Action::Move(10)),
             KeyCode::PageUp => Some(Action::Move(-10)),
-            KeyCode::Left | KeyCode::Char('h') => Some(Action::CycleFocus(false)),
-            KeyCode::Right | KeyCode::Char('l') => Some(Action::CycleFocus(true)),
+            KeyCode::Left | KeyCode::Char('h' | 'H') => Some(Action::Navigate(Direction::Left)),
+            KeyCode::Right | KeyCode::Char('l' | 'L') => Some(Action::Navigate(Direction::Right)),
             KeyCode::Enter => Some(Action::Activate),
             KeyCode::Char('n') => Some(Action::New),
             KeyCode::Char('i') => Some(Action::Import),
@@ -440,22 +454,31 @@ impl App {
 
     pub fn navigate(&mut self, action: &Action) -> bool {
         match *action {
-            Action::Focus(pane) => self.pane = pane,
+            Action::Focus(pane) => {
+                if self.pane != pane {
+                    self.focused_control = None;
+                }
+                self.pane = pane;
+            }
             Action::CycleFocus(forward) => {
                 let index = Pane::ALL.iter().position(|p| *p == self.pane).unwrap_or(0);
                 self.pane = Pane::ALL[(index + if forward { 1 } else { 3 }) % 4];
+                self.focused_control = None;
             }
             Action::SetTab(tab) => {
                 self.pane = Pane::Wallet;
                 self.tab = tab;
+                self.focused_control = Some(Action::SetTab(tab));
             }
             Action::Move(delta) => match self.pane {
                 Pane::Wallets => {
-                    self.wallet_cursor = move_index(self.wallet_cursor, delta, self.wallets.len())
+                    self.wallet_cursor = move_index(self.wallet_cursor, delta, self.wallets.len());
+                    self.focused_control = Some(Action::SelectWallet(self.wallet_cursor));
                 }
                 Pane::Wallet => {
                     self.transaction_cursor =
-                        move_index(self.transaction_cursor, delta, self.visible_records().len())
+                        move_index(self.transaction_cursor, delta, self.visible_records().len());
+                    self.focused_control = Some(Action::SelectTransaction(self.transaction_cursor));
                 }
                 Pane::Logs => {
                     self.follow = false;
@@ -549,5 +572,33 @@ mod tests {
             app.navigate(&Action::Move(10));
         }
         assert_eq!(app.wallet_cursor, 0);
+    }
+
+    #[test]
+    fn vim_and_arrow_keys_navigate_locally_while_tab_changes_panes() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        for (code, direction) in [
+            (KeyCode::Char('h'), Direction::Left),
+            (KeyCode::Char('H'), Direction::Left),
+            (KeyCode::Left, Direction::Left),
+            (KeyCode::Char('l'), Direction::Right),
+            (KeyCode::Char('L'), Direction::Right),
+            (KeyCode::Right, Direction::Right),
+            (KeyCode::Char('j'), Direction::Down),
+            (KeyCode::Char('k'), Direction::Up),
+        ] {
+            assert_eq!(
+                app.key(KeyEvent::new(code, KeyModifiers::NONE)),
+                Some(Action::Navigate(direction))
+            );
+        }
+        assert_eq!(
+            app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+            Some(Action::CycleFocus(true))
+        );
+        assert_eq!(
+            app.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Some(Action::CycleFocus(false))
+        );
     }
 }

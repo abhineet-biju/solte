@@ -162,7 +162,23 @@ impl Ui {
             );
             self.button(
                 frame,
-                Rect::new(inner.x, inner.y + 2, 18, 1),
+                Rect::new(inner.x, inner.y + 1, 15, 1),
+                "Theme t",
+                Action::Theme,
+                theme,
+                false,
+            );
+            self.button(
+                frame,
+                Rect::new(inner.x + 17, inner.y + 1, 15, 1),
+                "Motion m",
+                Action::Motion,
+                theme,
+                false,
+            );
+            self.button(
+                frame,
+                Rect::new(inner.x, inner.y + 3, 18, 1),
                 "Back to activity",
                 Action::SetTab(Tab::Overview),
                 theme,

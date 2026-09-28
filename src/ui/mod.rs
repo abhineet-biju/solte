@@ -1,3 +1,4 @@
+mod navigation;
 mod short;
 pub mod theme;
 
@@ -189,6 +190,9 @@ impl Ui {
             }
         }
         self.last_frame = Instant::now();
+        if app.modal.is_none() {
+            self.paint_control_focus(frame, app, theme);
+        }
     }
 
     fn header(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
@@ -919,10 +923,10 @@ impl Ui {
             )),
             Line::from(""),
             Line::from("Mouse + keyboard navigation"),
-            Line::from("Tab / Shift-Tab   Move focus"),
+            Line::from("Tab / Shift-Tab   Switch panels"),
             Line::from("↑ ↓ / j k         Move within lists"),
-            Line::from("← → / h l         Switch panels"),
-            Line::from("Enter             Open / select"),
+            Line::from("← → / h l         Move between pane options"),
+            Line::from("Enter             Activate focused option"),
             Line::from("1–4               Jump to panel"),
             Line::from("z                 Expand focused panel"),
             Line::from("v                 Cycle activity tabs"),
@@ -976,8 +980,8 @@ impl Ui {
         );
         let footer = Line::from(vec![
             Span::styled("  Tab", Style::default().fg(theme.accent)),
-            Span::raw(" focus   "),
-            Span::styled("j/k ↑/↓", Style::default().fg(theme.accent)),
+            Span::raw(" panes   "),
+            Span::styled("hjkl/←↓↑→", Style::default().fg(theme.accent)),
             Span::raw(" move   "),
             Span::styled("Enter", Style::default().fg(theme.accent)),
             Span::raw(" select   "),
@@ -1277,8 +1281,8 @@ impl Ui {
                     "NAVIGATION",
                     "Tab / Shift-Tab       Next / previous panel",
                     "1 / 2 / 3 / 4         Wallets / activity / network / logs",
-                    "j k / arrows          Move selection; h l switch panels",
-                    "Enter                 Select wallet or inspect transaction",
+                    "h j k l / arrows      Navigate inside the focused panel",
+                    "Enter                 Activate the underlined control",
                     "z                     Expand or restore focused panel",
                     "v                     Cycle Overview / Transactions / Settings",
                     "",
@@ -1301,7 +1305,9 @@ impl Ui {
                     "transaction rows to inspect. Buttons and form fields",
                     "are clickable. Use the wheel to scroll lists or logs.",
                     "",
-                    "Esc closes a dialog. q quits. Ctrl-C exits everywhere.",
+                    "In text fields, type normally; arrows move the cursor.",
+                    "Tab changes fields. Esc closes a dialog. q quits.",
+                    "Ctrl-C exits everywhere.",
                     "Public Devnet history can be incomplete. Solte preserves",
                     "records it captured; it cannot recover pruned records.",
                 ];
