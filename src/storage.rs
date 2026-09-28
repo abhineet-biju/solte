@@ -1,10 +1,8 @@
-use std::{
-    hash::{Hash, Hasher},
-    path::Path,
-};
+use std::path::Path;
 
 use anyhow::{Result, anyhow};
 use rusqlite::{Connection, params};
+use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -115,9 +113,7 @@ impl Store {
 }
 
 pub fn scope(endpoint: &str, address: &str) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    endpoint.hash(&mut hasher);
-    format!("{:016x}:{address}", hasher.finish())
+    format!("{:x}:{address}", Sha256::digest(endpoint.as_bytes()))
 }
 
 fn load(conn: &Connection, scope: &str) -> Result<Vec<TransactionRecord>> {

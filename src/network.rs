@@ -390,6 +390,7 @@ async fn refresh(
     watched.retain(|address| seen.insert(*address));
     for account in watched {
         let key = account.to_string();
+        let advance_cursor = older || !cursors.contains_key(&key);
         let mut before = if older {
             cursors.get(&key).copied()
         } else {
@@ -414,7 +415,7 @@ async fn refresh(
                 .and_then(|entry| Signature::from_str(&entry.signature).ok())
             {
                 before = Some(last);
-                if older || !cursors.contains_key(&key) {
+                if advance_cursor {
                     cursors.insert(key.clone(), last);
                 }
             }
@@ -438,6 +439,9 @@ async fn refresh(
                 break;
             }
             if page == 2 {
+                if let Some(before) = before {
+                    cursors.insert(key.clone(), before);
+                }
                 warnings.push("History backfill reached its page limit. Use Older to fetch earlier records; RPC retention may leave gaps.".into());
             }
         }
@@ -565,8 +569,10 @@ pub fn explorer_url(
     url.path_segments_mut()
         .map_err(|_| anyhow::anyhow!("Invalid explorer base"))?
         .extend([kind, value]);
-    if genesis == Some(DEVNET_GENESIS) || profile == &RpcProfile::devnet() {
+    if genesis == Some(DEVNET_GENESIS) || (genesis.is_none() && profile == &RpcProfile::devnet()) {
         url.query_pairs_mut().append_pair("cluster", "devnet");
+    } else if genesis == Some("4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY") {
+        url.query_pairs_mut().append_pair("cluster", "testnet");
     } else if genesis != Some(MAINNET_GENESIS) {
         let endpoint = url::Url::parse(&profile.http)?;
         if !endpoint.username().is_empty()

@@ -406,7 +406,7 @@ impl Ui {
                     .wrap(Wrap { trim: false }),
                 body,
             );
-            if body.height > 10 {
+            if body.height >= 12 {
                 self.button(
                     frame,
                     Rect::new(body.x, body.y + 9, 24.min(body.width), 1),
@@ -939,6 +939,16 @@ impl Ui {
             Paragraph::new(footer).style(Style::default().fg(theme.muted)),
             Rect::new(area.x, area.y + 2, area.width, 1),
         );
+        if area.width > 90 {
+            self.button(
+                frame,
+                Rect::new(area.right() - 23, area.y + 2, 10, 1),
+                "q Quit",
+                Action::Quit,
+                theme,
+                false,
+            );
+        }
         if area.width > 70 {
             self.button(
                 frame,
@@ -991,8 +1001,17 @@ impl Ui {
         );
         match modal {
             Modal::Form(form) => {
-                for (index, field) in form.fields.iter().enumerate() {
-                    let y = inner.y + index as u16 * 3 + 1;
+                let capacity = (inner.height.saturating_sub(8) / 3).max(1) as usize;
+                let offset = form.active.saturating_sub(capacity - 1);
+                for (row, (index, field)) in form
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .skip(offset)
+                    .take(capacity)
+                    .enumerate()
+                {
+                    let y = inner.y + row as u16 * 3 + 1;
                     if y + 1 >= inner.bottom() {
                         break;
                     }
@@ -1024,6 +1043,25 @@ impl Ui {
                         field_area,
                     );
                     self.target(field_area, Action::Field(index));
+                }
+                if capacity < form.fields.len() {
+                    let y = inner.bottom().saturating_sub(6);
+                    self.button(
+                        frame,
+                        Rect::new(inner.x, y, 10, 1),
+                        "Previous",
+                        Action::Field(form.active.saturating_sub(1)),
+                        theme,
+                        false,
+                    );
+                    self.button(
+                        frame,
+                        Rect::new(inner.right() - 10, y, 10, 1),
+                        "Next",
+                        Action::Field((form.active + 1).min(form.fields.len() - 1)),
+                        theme,
+                        false,
+                    );
                 }
                 let note = form.error.as_deref().unwrap_or(match form.kind {
                     crate::app::FormKind::Fund => {
@@ -1068,8 +1106,17 @@ impl Ui {
                 );
             }
             Modal::Profiles { selected } => {
-                for (index, profile) in app.config.profiles.iter().enumerate() {
-                    let y = inner.y + index as u16 * 2 + 1;
+                let capacity = (inner.height.saturating_sub(4) / 2).max(1) as usize;
+                let offset = selected.saturating_sub(capacity - 1);
+                for (row, (index, profile)) in app
+                    .config
+                    .profiles
+                    .iter()
+                    .enumerate()
+                    .skip(offset)
+                    .enumerate()
+                {
+                    let y = inner.y + row as u16 * 2 + 1;
                     if y >= inner.bottom().saturating_sub(3) {
                         break;
                     }
@@ -1387,5 +1434,38 @@ mod tests {
         assert!(!ui.hits.iter().any(|h| matches!(h.action, Action::Focus(_))));
         assert!(ui.hits.iter().any(|h| h.action == Action::Submit));
         assert!(ui.hits.iter().any(|h| h.action == Action::Field(0)));
+    }
+
+    #[test]
+    fn every_panel_and_form_remains_clickable_in_compact_windows() {
+        for (width, height) in [(48, 14), (80, 22), (100, 28), (160, 48)] {
+            let mut app = App::new("/test/project".into(), Config::default(), vec![]);
+            crate::demo::populate(&mut app);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut ui = Ui::default();
+            for pane in Pane::ALL {
+                app.pane = pane;
+                terminal.draw(|f| ui.draw(f, &app)).unwrap();
+                assert!(
+                    ui.hits
+                        .iter()
+                        .all(|h| h.area.right() <= width && h.area.bottom() <= height),
+                    "{pane:?} at {width}x{height}"
+                );
+            }
+            app.open_form(crate::app::FormKind::Profile);
+            for active in 0..3 {
+                app.navigate(&Action::Field(active));
+                terminal.draw(|f| ui.draw(f, &app)).unwrap();
+                assert!(ui.hits.iter().any(|h| h.action == Action::Field(active)));
+                let submit = ui.hits.iter().find(|h| h.action == Action::Submit).unwrap();
+                assert!(
+                    ui.hits
+                        .iter()
+                        .filter(|h| matches!(h.action, Action::Field(_)))
+                        .all(|h| h.area.intersection(submit.area).is_empty())
+                );
+            }
+        }
     }
 }

@@ -16,6 +16,7 @@ ratatui = "0.30.2"
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 solana-commitment-config = "3.1.1"
 solana-keypair = "3.1.2"
 solana-pubkey = "4.3.0"
@@ -28,7 +29,6 @@ solana-system-interface = { version = "3.3", features = ["bincode"] }
 solana-transaction = { version = "4.2", features = ["wincode"] }
 solana-transaction-status-client-types = { version = "=4.3.0", features = ["agave-unstable-api"] }
 tachyonfx = { version = "0.25.2", default-features = false, features = ["std", "sendable"] }
-thiserror = "2"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 toml = "1"

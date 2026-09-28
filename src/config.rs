@@ -32,7 +32,8 @@ impl RpcProfile {
     }
 
     pub fn custom(name: &str, http: &str, websocket: &str) -> Result<Self> {
-        if name.trim().is_empty() || name.chars().count() > 40 {
+        if name.trim().is_empty() || name.chars().count() > 40 || name.chars().any(char::is_control)
+        {
             bail!("Choose a profile name between 1 and 40 characters");
         }
         let http_url = Url::parse(http.trim()).context("Invalid HTTP endpoint")?;

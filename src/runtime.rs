@@ -44,6 +44,9 @@ struct Services {
 impl Services {
     fn restart(&mut self, app: &mut App) {
         self.monitor = None;
+        if app.session > 0 {
+            app.logs.clear();
+        }
         app.session += 1;
         app.records.clear();
         app.transaction_cursor = 0;
@@ -53,7 +56,6 @@ impl Services {
         app.subscribed = false;
         app.last_update = None;
         app.last_signature = None;
-        app.logs.clear();
         app.status = format!("Connecting to {}…", app.profile().name);
         app.log(
             "INFO",
@@ -106,6 +108,19 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
         None
     };
     let store = Store::open(temporary.as_ref().map(|d| d.path()).unwrap_or(&app.root))?;
+    let diagnostics_dir = temporary
+        .as_ref()
+        .map(|d| d.path())
+        .unwrap_or(&app.root)
+        .join(".solte");
+    let (writer, _logging_guard) = tracing_appender::non_blocking(
+        tracing_appender::rolling::never(diagnostics_dir, "diagnostics.log"),
+    );
+    let _ = tracing_subscriber::fmt()
+        .with_writer(writer)
+        .with_ansi(false)
+        .with_env_filter("solte=info")
+        .try_init();
     let (network_sender, mut network_receiver) = mpsc::channel(128);
     let (operation_sender, mut operation_receiver) = mpsc::channel(32);
     let (local_sender, mut local_receiver) = mpsc::channel(32);
@@ -350,8 +365,14 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 });
             }
         }
-        Action::CopyAddress => copy(app.wallet().context("No wallet selected")?.address.clone())?,
-        Action::CopySignature => copy(selected_signature(app).context("No transaction selected")?)?,
+        Action::CopyAddress => {
+            copy(app.wallet().context("No wallet selected")?.address.clone())?;
+            app.status = "Copy requested · terminal clipboard support required".into();
+        }
+        Action::CopySignature => {
+            copy(selected_signature(app).context("No transaction selected")?)?;
+            app.status = "Copy requested · terminal clipboard support required".into();
+        }
         Action::ExplorerWallet | Action::ExplorerTransaction => {
             let (kind, value) = if action == Action::ExplorerWallet {
                 (
@@ -505,7 +526,22 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                     let update = match operations::prepare(&profile, &wallet, &recipient, lamports)
                         .await
                     {
-                        Ok(prepared) => OperationUpdate::Prepared(Box::new(prepared)),
+                        Ok(prepared) => {
+                            if let Some(error) = &prepared.simulation_error {
+                                let scope = crate::storage::scope(&profile.http, &wallet.address);
+                                let message = format!(
+                                    "Simulation failed; no transaction submitted: {error}\n{}",
+                                    prepared.logs.join("\n")
+                                );
+                                if let Err(error) = store
+                                    .log(&scope, crate::model::LogEntry::new("ERROR", message))
+                                    .await
+                                {
+                                    tracing::error!(%error, "Cannot persist simulation failure");
+                                }
+                            }
+                            OperationUpdate::Prepared(Box::new(prepared))
+                        }
                         Err(error) => OperationUpdate::Failed(network::safe_error(error, &profile)),
                     };
                     let _ = sender.send(OperationEvent { session, update }).await;

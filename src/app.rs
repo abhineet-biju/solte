@@ -461,6 +461,9 @@ impl App {
                 Pane::Network => {}
             },
             Action::Scroll(delta) => match &mut self.modal {
+                Some(Modal::Form(form)) => {
+                    form.active = move_index(form.active, delta, form.fields.len());
+                }
                 Some(Modal::Profiles { selected }) => {
                     *selected = move_index(*selected, delta, self.config.profiles.len())
                 }

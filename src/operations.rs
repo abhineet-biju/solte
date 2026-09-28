@@ -134,6 +134,12 @@ pub async fn submit(
             .await;
         // The signature is known before submission, so an uncertain response can be checked safely.
         if let Err(error) = rpc.send_transaction(&prepared.transaction).await {
+            if error.get_transaction_error().is_some() {
+                bail!(
+                    "Preflight rejected {signature}: {}",
+                    safe_error(error, &profile)
+                );
+            }
             persist(
                 &store,
                 &scope,
