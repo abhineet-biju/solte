@@ -188,7 +188,11 @@ impl Ui {
             self.border_button(
                 frame,
                 Rect::new(area.right() - 5, area.bottom() - 1, 3, 1),
-                if app.zoomed { "−" } else { "+" },
+                if app.zoomed && app.pane == pane {
+                    "−"
+                } else {
+                    "+"
+                },
                 Action::Expand(pane),
                 theme,
             );
@@ -610,8 +614,16 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(area.right() - 18, area.y, 8, 1),
-                "Find /",
-                Action::Search,
+                if app.filter.is_empty() {
+                    "Find /"
+                } else {
+                    "Clear x"
+                },
+                if app.filter.is_empty() {
+                    Action::Search
+                } else {
+                    Action::ClearFilter
+                },
                 theme,
                 false,
             );
@@ -1425,7 +1437,7 @@ impl Ui {
                     "p  RPC profiles       r  Refresh current view",
                     "",
                     "HISTORY",
-                    "/  Filter             e  Show failures only",
+                    "/  Filter   x Clear   e  Show failures only",
                     "b  Fetch older        o  Open selected transaction in explorer",
                     "F  Follow logs        C  Clear visible session log",
                     "",

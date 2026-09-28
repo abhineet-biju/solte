@@ -91,6 +91,7 @@ pub enum Action {
     Follow,
     ClearLogs,
     Search,
+    ClearFilter,
     Failures,
     Help,
     Zoom,
@@ -508,6 +509,7 @@ impl App {
             KeyCode::Char('F') => Some(Action::Follow),
             KeyCode::Char('C') => Some(Action::ClearLogs),
             KeyCode::Char('/') => Some(Action::Search),
+            KeyCode::Char('x') => Some(Action::ClearFilter),
             KeyCode::Char('e') => Some(Action::Failures),
             KeyCode::Char('?') => Some(Action::Help),
             KeyCode::Char('z') => Some(Action::Zoom),
@@ -607,6 +609,11 @@ impl App {
                 self.logs.clear();
                 self.log_scroll = 0;
             }
+            Action::ClearFilter => {
+                self.filter.clear();
+                self.transaction_cursor = 0;
+                self.status = "Search cleared".into();
+            }
             Action::Failures => {
                 self.failures_only = !self.failures_only;
                 self.pane = Pane::Wallet;
@@ -631,8 +638,9 @@ impl App {
                 self.pane = pane;
             }
             Action::Close => {
-                self.modal = None;
-                self.zoomed = false;
+                if self.modal.take().is_none() {
+                    self.zoomed = false;
+                }
             }
             _ => return false,
         }
@@ -647,6 +655,22 @@ fn move_index(index: usize, delta: i32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dialog_dismissal_preserves_layout_and_search_can_be_cleared() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        app.zoomed = true;
+        app.modal = Some(Modal::Help { scroll: 0 });
+        app.navigate(&Action::Close);
+        assert!(app.zoomed && app.modal.is_none());
+        app.navigate(&Action::Close);
+        assert!(!app.zoomed);
+        app.filter = "missing".into();
+        app.failures_only = true;
+        app.navigate(&Action::ClearFilter);
+        assert!(app.filter.is_empty());
+        assert!(app.failures_only);
+    }
 
     #[test]
     fn errors_filter_opens_activity_and_restores_all_records() {

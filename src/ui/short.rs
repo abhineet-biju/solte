@@ -216,7 +216,15 @@ impl Ui {
             x += width + 1;
         }
         let visible = app.visible_records();
-        let count = inner.height.saturating_sub(3) as usize;
+        let filtered = u16::from(!app.filter.is_empty());
+        if filtered > 0 {
+            frame.render_widget(
+                Paragraph::new(format!(" Filter: {}", clean_text(&app.filter)))
+                    .style(Style::default().fg(theme.accent)),
+                Rect::new(inner.x, inner.y + 2, inner.width, 1),
+            );
+        }
+        let count = inner.height.saturating_sub(3 + filtered) as usize;
         let offset = app
             .transaction_cursor
             .saturating_sub(count.saturating_sub(1));
@@ -227,7 +235,7 @@ impl Ui {
             .take(count)
             .enumerate()
         {
-            let rect = Rect::new(inner.x, inner.y + 2 + row as u16, inner.width, 1);
+            let rect = Rect::new(inner.x, inner.y + 2 + filtered + row as u16, inner.width, 1);
             frame.render_widget(
                 Paragraph::new(format!(
                     " {} {}  {}  slot {}",
@@ -261,15 +269,23 @@ impl Ui {
                     " No matching captured transactions."
                 })
                 .style(Style::default().fg(theme.muted)),
-                Rect::new(inner.x, inner.y + 2, inner.width, 1),
+                Rect::new(inner.x, inner.y + 2 + filtered, inner.width, 1),
             );
         }
         let y = inner.bottom() - 1;
         self.button(
             frame,
             Rect::new(inner.x, y, 10, 1),
-            "Find /",
-            Action::Search,
+            if app.filter.is_empty() {
+                "Find /"
+            } else {
+                "Clear x"
+            },
+            if app.filter.is_empty() {
+                Action::Search
+            } else {
+                Action::ClearFilter
+            },
             theme,
             false,
         );
