@@ -21,7 +21,7 @@ use tachyonfx::{Effect, fx};
 
 use crate::{
     amount::format_sol,
-    app::{Action, App, Appearance, Modal, Pane, Tab, View},
+    app::{Action, App, Appearance, Modal, Pane, View},
     model::{clean_text, now, short},
 };
 use theme::Theme;
@@ -454,10 +454,6 @@ impl Ui {
             return;
         }
         let body = inner;
-        if app.tab == Tab::Settings {
-            self.settings(frame, app, body, theme);
-            return;
-        }
         let Some(wallet) = app.wallet() else {
             self.welcome(frame, body, theme);
             return;
@@ -504,7 +500,7 @@ impl Ui {
             );
             return;
         }
-        if app.tab == Tab::Overview && body.height >= 18 {
+        if app.view == View::Overview && body.height >= 18 {
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(short(&wallet.address), Style::default().fg(theme.muted)),
@@ -582,7 +578,7 @@ impl Ui {
                 Rect::new(body.x, body.y + 9, body.width, body.height - 9),
                 theme,
             );
-        } else if app.tab == Tab::Overview && body.height >= 10 {
+        } else if app.view == View::Overview && body.height >= 10 {
             let balance = app.balance.map(format_sol).unwrap_or_else(|| "—".into());
             frame.render_widget(
                 Paragraph::new(format!(
@@ -1071,77 +1067,27 @@ impl Ui {
                 ])
             })
             .collect();
-        frame.render_widget(
-            Paragraph::new(if lines.is_empty() {
-                vec![Line::from(Span::styled(
-                    if query.is_empty() {
-                        "Ready. Wallet actions and connection events appear here."
-                    } else {
-                        "No matching logs. Press x to clear the filter."
-                    },
-                    Style::default().fg(theme.muted),
-                ))]
-            } else {
-                lines
-            }),
-            inner,
-        );
-    }
-
-    fn settings(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let lines = vec![
-            Line::from(Span::styled(
-                "MAKE YOURSELF AT HOME",
-                Style::default().fg(theme.accent).bold(),
-            )),
-            Line::from(""),
-            Line::from(format!("Theme          {}", app.config.theme)),
-            Line::from(format!(
-                "Motion         {}",
-                if app.config.reduced_motion {
-                    "Reduced"
+        let paragraph = Paragraph::new(if lines.is_empty() {
+            vec![Line::from(Span::styled(
+                if query.is_empty() {
+                    "Ready. Wallet actions and connection events appear here."
                 } else {
-                    "Subtle transitions"
-                }
-            )),
-            Line::from(""),
-            Line::from("Mouse + keyboard navigation"),
-            Line::from("Tab / Shift-Tab   Switch panels"),
-            Line::from("↑ ↓ / j k         Move within lists"),
-            Line::from("← → / h l         Move between pane options"),
-            Line::from("Enter             Activate focused option"),
-            Line::from("1–4               Jump to panel"),
-            Line::from("z                 Expand focused panel"),
-            Line::from("v                 Cycle activity tabs"),
-            Line::from(""),
-            Line::from("Project data stays in .solte/"),
-            Line::from("Standard JSON keys · local SQLite history"),
-        ];
-        frame.render_widget(
-            Paragraph::new(lines)
-                .style(Style::default().fg(theme.muted))
-                .wrap(Wrap { trim: false }),
-            Rect::new(area.x, area.y, area.width, area.height.saturating_sub(3)),
-        );
-        if area.height >= 4 {
-            self.button(
-                frame,
-                Rect::new(area.x, area.bottom() - 2, 17, 1),
-                "Choose theme t",
-                Action::Theme,
-                theme,
-                false,
-            );
-            if area.width > 36 {
-                self.button(
-                    frame,
-                    Rect::new(area.x + 19, area.bottom() - 2, 17, 1),
-                    "Choose motion m",
-                    Action::Motion,
-                    theme,
-                    false,
-                );
-            }
+                    "No matching logs. Press x to clear the filter."
+                },
+                Style::default().fg(theme.muted),
+            ))]
+        } else {
+            lines
+        });
+        if app.view == View::Logs {
+            let paragraph = paragraph.wrap(Wrap { trim: false });
+            let offset = paragraph
+                .line_count(inner.width)
+                .saturating_sub(inner.height as usize)
+                .min(u16::MAX as usize) as u16;
+            frame.render_widget(paragraph.scroll((offset, 0)), inner);
+        } else {
+            frame.render_widget(paragraph, inner);
         }
     }
 
@@ -1163,13 +1109,13 @@ impl Ui {
         );
         let footer = Line::from(vec![
             Span::styled("  Tab", Style::default().fg(theme.accent)),
-            Span::raw(" panes   "),
+            Span::raw(" focus   "),
             Span::styled("hjkl/←↓↑→", Style::default().fg(theme.accent)),
             Span::raw(" move   "),
             Span::styled("Enter", Style::default().fg(theme.accent)),
             Span::raw(" select   "),
             Span::styled("z", Style::default().fg(theme.accent)),
-            Span::raw(" zoom"),
+            Span::raw(" overview"),
         ]);
         frame.render_widget(
             Paragraph::new(footer).style(Style::default().fg(theme.muted)),
@@ -1908,8 +1854,8 @@ mod tests {
                 let mut app = App::new("/test".into(), Config::default(), vec![]);
                 app.config.theme = name.into();
                 app.pane = Pane::Wallet;
-                for zoomed in [false, true] {
-                    app.zoomed = zoomed;
+                for view in [View::Overview, View::Activity] {
+                    app.switch_view(view);
                     let mut ui = Ui::default();
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                     terminal.draw(|frame| ui.draw(frame, &app)).unwrap();

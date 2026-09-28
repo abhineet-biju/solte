@@ -3,7 +3,7 @@ use ratatui::{Frame, layout::Rect, style::Style, widgets::Paragraph};
 use super::{Ui, theme::Theme};
 use crate::{
     amount::format_sol,
-    app::{Action, App, Form, Pane, Tab, View},
+    app::{Action, App, Form, Pane, View},
     model::{clean_text, short},
 };
 
@@ -79,7 +79,8 @@ impl Ui {
 
     pub(super) fn short_wallets(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(frame, app, area, Pane::Wallets, "Project identities", theme);
-        let count = inner.height.saturating_sub(1) as usize;
+        let stacked = inner.width < 44;
+        let count = inner.height.saturating_sub(if stacked { 2 } else { 1 }) as usize;
         let offset = app.wallet_cursor.saturating_sub(count.saturating_sub(1));
         if app.wallets.is_empty() {
             frame.render_widget(
@@ -115,7 +116,7 @@ impl Ui {
                 index == app.wallet_cursor,
             );
         }
-        let y = inner.bottom() - 1;
+        let y = inner.bottom() - if stacked { 2 } else { 1 };
         self.button(
             frame,
             Rect::new(inner.x, y, 17, 1),
@@ -134,7 +135,12 @@ impl Ui {
         );
         self.button(
             frame,
-            Rect::new(inner.x + 31, y, 12, 1),
+            Rect::new(
+                if stacked { inner.x } else { inner.x + 31 },
+                if stacked { y + 1 } else { y },
+                12,
+                1,
+            ),
             "Cycle ]",
             Action::NextWallet,
             theme,
@@ -144,46 +150,6 @@ impl Ui {
 
     pub(super) fn short_wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(frame, app, area, Pane::Wallet, "Wallet activity", theme);
-        if app.tab == Tab::Settings {
-            frame.render_widget(
-                Paragraph::new(format!(
-                    " Theme: {} · Motion: {}",
-                    app.config.theme,
-                    if app.config.reduced_motion {
-                        "reduced"
-                    } else {
-                        "enabled"
-                    }
-                ))
-                .style(Style::default().fg(theme.text)),
-                inner,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.x, inner.y + 1, 15, 1),
-                "Theme t",
-                Action::Theme,
-                theme,
-                false,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.x + 17, inner.y + 1, 15, 1),
-                "Motion m",
-                Action::Motion,
-                theme,
-                false,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.x, inner.y + 3, 18, 1),
-                "Back to activity",
-                Action::SetTab(Tab::Overview),
-                theme,
-                false,
-            );
-            return;
-        }
         let Some(wallet) = app.wallet() else {
             self.welcome(frame, inner, theme);
             return;

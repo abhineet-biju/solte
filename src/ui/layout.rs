@@ -312,6 +312,22 @@ mod tests {
                     })
                     .collect();
                 assert_eq!(panels, vec![view.pane()]);
+                let panel = ui
+                    .hits
+                    .iter()
+                    .find(|hit| hit.action == Action::Focus(view.pane()))
+                    .unwrap()
+                    .area;
+                for hit in &ui.hits {
+                    if hit.area.y >= panel.y && hit.area.y < panel.bottom() {
+                        assert_eq!(
+                            hit.area.intersection(panel),
+                            hit.area,
+                            "{view:?} {width}x{height} {:?}",
+                            hit.action
+                        );
+                    }
+                }
                 assert!(
                     !ui.hits
                         .iter()
@@ -326,13 +342,12 @@ mod tests {
     }
 
     #[test]
-    fn short_and_expanded_views_keep_readable_log_context() {
+    fn overview_keeps_readable_log_context() {
         let mut app = App::new("/test".into(), Config::default(), vec![]);
         demo::populate(&mut app);
         app.pane = Pane::Wallet;
         for (width, height) in [(60, 17), (100, 14), (100, 20), (140, 42)] {
-            for zoomed in [false, true] {
-                app.zoomed = zoomed;
+            {
                 let mut ui = Ui::default();
                 Terminal::new(TestBackend::new(width, height))
                     .unwrap()

@@ -187,7 +187,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     other => other,
                 };
                 if let Some(action) = action {
-                    let animate = matches!(action, Action::Focus(_) | Action::CycleFocus(_) | Action::SetTab(_) | Action::Theme | Action::New | Action::Import | Action::Inspect | Action::SelectTransaction(_));
+                    let animate = matches!(action, Action::Focus(_) | Action::CycleFocus(_) | Action::Selector(_) | Action::Theme | Action::New | Action::Import | Action::Inspect | Action::SelectTransaction(_));
                     match handle(&mut app, &mut services, action).await {
                         Ok(true) => break,
                         Ok(false) => {},
@@ -452,7 +452,6 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         Action::Older => {
             app.switch_view(crate::app::View::Activity);
             app.pane = Pane::Wallet;
-            app.tab = crate::app::Tab::Transactions;
             if app.history_loading {
                 return Ok(false);
             }

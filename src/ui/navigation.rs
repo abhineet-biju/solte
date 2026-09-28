@@ -1,7 +1,7 @@
 use ratatui::{Frame, layout::Rect};
 
 use super::{Hit, Ui, theme::Theme};
-use crate::app::{Action, App, Direction, Modal, Pane, Tab, View};
+use crate::app::{Action, App, Direction, Modal, Pane, View};
 
 impl Ui {
     fn pane_area(&self, pane: Pane) -> Option<Rect> {
@@ -33,8 +33,7 @@ impl Ui {
         let default = match app.pane {
             Pane::Wallets if !app.wallets.is_empty() => Action::SelectWallet(app.wallet_cursor),
             Pane::Wallets => Action::New,
-            Pane::Wallet if app.tab == Tab::Settings => Action::Theme,
-            Pane::Wallet => Action::SetTab(app.tab),
+            Pane::Wallet => Action::Fund,
             Pane::Network => Action::Profiles,
             Pane::Logs => Action::Follow,
         };
@@ -311,22 +310,6 @@ mod tests {
                     assert_eq!(app.pane, pane);
                 }
             }
-        }
-    }
-
-    #[test]
-    fn settings_options_are_reachable_in_both_layouts() {
-        let mut app = App::new("/test".into(), Config::default(), vec![]);
-        demo::populate(&mut app);
-        let mut ui = Ui::default();
-        for (width, height) in [(60, 10), (160, 48)] {
-            app.navigate(&Action::SetTab(Tab::Settings));
-            app.focused_control = Some(Action::Theme);
-            render(&mut ui, &app, width, height);
-            ui.navigate_control(&mut app, Direction::Right);
-            assert_eq!(ui.focused_action(&app), Some(Action::Motion));
-            ui.navigate_control(&mut app, Direction::Left);
-            assert_eq!(ui.focused_action(&app), Some(Action::Theme));
         }
     }
 
