@@ -219,7 +219,13 @@ impl Ui {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if focused { theme.accent } else { theme.border }))
+            .border_style(
+                Style::default().fg(if focused && app.view != View::Overview {
+                    theme.accent
+                } else {
+                    theme.border
+                }),
+            )
             .style(Style::default().bg(theme.panel))
             .title(Line::from(vec![Span::styled(
                 format!(" {title} "),
@@ -1766,6 +1772,60 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn overview_borders_are_neutral_and_actions_only_wrap_when_necessary() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        for width in [80, 90, 99, 100] {
+            let mut ui = Ui::default();
+            let mut terminal = Terminal::new(TestBackend::new(width, 22)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            for hit in ui
+                .hits
+                .iter()
+                .filter(|hit| matches!(hit.action, Action::Focus(_)))
+            {
+                assert_eq!(
+                    terminal.backend().buffer()[(hit.area.x, hit.area.y)].fg,
+                    Theme::named(&app.config.theme).border
+                );
+            }
+            let actions: Vec<_> = [
+                Action::Fund,
+                Action::Send,
+                Action::CopyAddress,
+                Action::ExplorerWallet,
+                Action::Profiles,
+            ]
+            .into_iter()
+            .map(|action| {
+                ui.hits
+                    .iter()
+                    .find(|hit| hit.action == action)
+                    .unwrap()
+                    .area
+            })
+            .collect();
+            let panel = ui
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Focus(Pane::Wallet))
+                .unwrap()
+                .area;
+            if panel.width - 2 >= 43 {
+                assert!(
+                    actions.iter().all(|area| area.y == actions[0].y),
+                    "{width} columns"
+                );
+            } else {
+                assert!(actions.last().unwrap().y > actions[0].y);
+            }
+            for area in actions {
+                assert_eq!(area.intersection(panel), area);
+            }
+        }
     }
 
     #[test]

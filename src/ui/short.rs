@@ -196,15 +196,21 @@ impl Ui {
             ("Explorer", Action::ExplorerWallet),
             ("RPC [p]", Action::Profiles),
         ];
-        let toolbar_width = actions
+        let labels_width = actions
             .iter()
-            .map(|(label, _)| label.len() as u16 + 2)
-            .sum::<u16>()
-            + actions.len() as u16
-            - 1;
-        for (index, (label, action)) in actions.into_iter().enumerate() {
-            let width = label.len() as u16 + 2;
-            if x + width > inner.right() || (index == 3 && toolbar_width > inner.width) {
+            .map(|(label, _)| Line::from(*label).width() as u16)
+            .sum::<u16>();
+        let gaps = actions.len() as u16 - 1;
+        let compact_fits = labels_width + gaps <= inner.width;
+        let padding =
+            if compact_fits && labels_width + gaps + 2 * actions.len() as u16 > inner.width {
+                0
+            } else {
+                2
+            };
+        for (label, action) in actions {
+            let width = Line::from(label).width() as u16 + padding;
+            if x + width > inner.right() {
                 x = inner.x;
                 toolbar_y += 1;
             }
