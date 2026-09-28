@@ -136,6 +136,16 @@ impl Ui {
         }
     }
 
+    fn sidebar_separator(&self, frame: &mut Frame, inner: Rect, content: Rect, theme: Theme) {
+        if inner.height >= 8 {
+            frame.render_widget(
+                Paragraph::new("─".repeat(inner.width as usize))
+                    .style(Style::default().fg(theme.border)),
+                Rect::new(inner.x, content.bottom(), inner.width, 1),
+            );
+        }
+    }
+
     fn identity_sidebar(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(
             frame,
@@ -145,9 +155,9 @@ impl Ui {
             &format!("Wallets · {}", app.wallets.len()),
             theme,
         );
-        let spacious = inner.height >= 8;
-        let controls_height = if spacious { 4 } else { 2 };
-        let count = inner.height.saturating_sub(controls_height) as usize;
+        let (content, first, second) = sidebar_sections(inner);
+        self.sidebar_separator(frame, inner, content, theme);
+        let count = content.height as usize;
         let offset = app.wallet_cursor.saturating_sub(count.saturating_sub(1));
         for (row, (index, wallet)) in app
             .wallets
@@ -178,37 +188,11 @@ impl Ui {
         if app.wallets.is_empty() {
             frame.render_widget(
                 Paragraph::new("No wallets").style(Style::default().fg(theme.muted)),
-                inner,
+                content,
             );
         }
-        if spacious {
-            frame.render_widget(
-                Paragraph::new("─".repeat(inner.width as usize))
-                    .style(Style::default().fg(theme.border)),
-                Rect::new(inner.x, inner.bottom() - 4, inner.width, 1),
-            );
-        }
-        self.shortcut_button(
-            frame,
-            Rect::new(
-                inner.x,
-                inner.bottom() - if spacious { 3 } else { 2 },
-                inner.width,
-                1,
-            ),
-            "New wallet",
-            "n",
-            Action::New,
-            theme,
-        );
-        self.shortcut_button(
-            frame,
-            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-            "Import",
-            "i",
-            Action::Import,
-            theme,
-        );
+        self.shortcut_button(frame, first, "New wallet", "n", Action::New, theme);
+        self.shortcut_button(frame, second, "Import", "i", Action::Import, theme);
     }
 
     fn network_sidebar(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
@@ -259,7 +243,9 @@ impl Ui {
                 ])
             })
             .collect();
-        let visible = inner.height.saturating_sub(2);
+        let (content, first, second) = sidebar_sections(inner);
+        self.sidebar_separator(frame, inner, content, theme);
+        let visible = content.height;
         let scroll = app
             .network_scroll
             .min((lines.len() as u16).saturating_sub(visible));
@@ -267,23 +253,36 @@ impl Ui {
             Paragraph::new(lines).scroll((scroll, 0)),
             Rect::new(inner.x, inner.y, inner.width, visible),
         );
+        self.button(frame, first, "Profiles [p]", Action::Profiles, theme, false);
         self.button(
             frame,
-            Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
-            "Profiles [p]",
-            Action::Profiles,
-            theme,
-            false,
-        );
-        self.button(
-            frame,
-            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+            second,
             &app.refresh_label(),
             Action::Refresh,
             theme,
             false,
         );
     }
+}
+
+fn sidebar_sections(inner: Rect) -> (Rect, Rect, Rect) {
+    let spacious = inner.height >= 8;
+    let reserved = if spacious { 4 } else { 2 };
+    (
+        Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(reserved),
+        ),
+        Rect::new(
+            inner.x,
+            inner.bottom() - if spacious { 3 } else { 2 },
+            inner.width,
+            1,
+        ),
+        Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+    )
 }
 
 #[cfg(test)]
