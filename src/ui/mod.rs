@@ -1797,7 +1797,6 @@ mod tests {
                 Action::Send,
                 Action::CopyAddress,
                 Action::ExplorerWallet,
-                Action::Profiles,
             ]
             .into_iter()
             .map(|action| {
@@ -1814,7 +1813,7 @@ mod tests {
                 .find(|hit| hit.action == Action::Focus(Pane::Wallet))
                 .unwrap()
                 .area;
-            if panel.width - 2 >= 43 {
+            if panel.width - 2 >= 35 {
                 assert!(
                     actions.iter().all(|area| area.y == actions[0].y),
                     "{width} columns"
@@ -1825,6 +1824,20 @@ mod tests {
             for area in actions {
                 assert_eq!(area.intersection(panel), area);
             }
+            let network = ui
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Focus(Pane::Network))
+                .unwrap()
+                .area;
+            let profiles = ui
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Profiles)
+                .unwrap()
+                .area;
+            assert_eq!(profiles.intersection(network), profiles);
+            assert!(profiles.intersection(panel).is_empty());
         }
     }
 

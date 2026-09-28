@@ -194,7 +194,6 @@ impl Ui {
             ("Send [s]", Action::Send),
             ("Copy [y]", Action::CopyAddress),
             ("Explorer", Action::ExplorerWallet),
-            ("RPC [p]", Action::Profiles),
         ];
         let labels_width = actions
             .iter()
