@@ -580,8 +580,14 @@ impl App {
             KeyCode::Up | KeyCode::Char('k' | 'K') => Some(Action::Navigate(Direction::Up)),
             KeyCode::PageDown => Some(Action::Move(10)),
             KeyCode::PageUp => Some(Action::Move(-10)),
-            KeyCode::Left | KeyCode::Char('h' | 'H') => Some(Action::Navigate(Direction::Left)),
-            KeyCode::Right | KeyCode::Char('l' | 'L') => Some(Action::Navigate(Direction::Right)),
+            KeyCode::Left => Some(Action::Selector(
+                View::ALL[(self.view as usize).saturating_sub(1)],
+            )),
+            KeyCode::Char('h' | 'H') => Some(Action::Navigate(Direction::Left)),
+            KeyCode::Right => Some(Action::Selector(
+                View::ALL[(self.view as usize + 1).min(View::ALL.len() - 1)],
+            )),
+            KeyCode::Char('l' | 'L') => Some(Action::Navigate(Direction::Right)),
             KeyCode::Enter => Some(Action::Activate),
             KeyCode::Char('n') => Some(Action::New),
             KeyCode::Char('i') => Some(Action::Import),
@@ -737,6 +743,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn horizontal_arrows_switch_views_but_remain_local_in_dialogs() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        let right = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(app.key(right), Some(Action::Selector(View::Wallets)));
+        app.switch_view(View::Network);
+        assert_eq!(app.key(right), Some(Action::Selector(View::Logs)));
+        assert_eq!(
+            app.key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE)),
+            Some(Action::Navigate(Direction::Right))
+        );
+        app.open_form(FormKind::Import);
+        app.paste("test");
+        assert_eq!(
+            app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+            None
+        );
+        assert!(matches!(&app.modal, Some(Modal::Form(form)) if form.fields[0].cursor == 3));
+        assert_eq!(app.view, View::Network);
+        app.modal = Some(Modal::Profiles { selected: 0 });
+        assert_eq!(app.key(right), None);
+    }
+
+    #[test]
     fn views_restore_focus_without_losing_filters_or_scroll() {
         let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
         app.switch_view(View::Activity);
@@ -822,10 +851,8 @@ mod tests {
         for (code, direction) in [
             (KeyCode::Char('h'), Direction::Left),
             (KeyCode::Char('H'), Direction::Left),
-            (KeyCode::Left, Direction::Left),
             (KeyCode::Char('l'), Direction::Right),
             (KeyCode::Char('L'), Direction::Right),
-            (KeyCode::Right, Direction::Right),
             (KeyCode::Char('j'), Direction::Down),
             (KeyCode::Char('k'), Direction::Up),
         ] {

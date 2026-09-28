@@ -1109,8 +1109,8 @@ impl Ui {
         );
         let footer = Line::from(vec![
             Span::styled("  Tab", Style::default().fg(theme.accent)),
-            Span::raw(" focus   "),
-            Span::styled("hjkl/←↓↑→", Style::default().fg(theme.accent)),
+            Span::raw(" focus   ←/→ views   "),
+            Span::styled("hjkl/↑↓", Style::default().fg(theme.accent)),
             Span::raw(" move   "),
             Span::styled("Enter", Style::default().fg(theme.accent)),
             Span::raw(" select   "),
@@ -1515,7 +1515,8 @@ impl Ui {
                     "NAVIGATION",
                     "Tab / Shift-Tab       Focus regions in this view",
                     "1–5                   Overview / Wallets / Transactions / Network / Logs",
-                    "h j k l / arrows      Navigate inside the focused panel",
+                    "Left / Right          Previous / next main view",
+                    "h j k l / Up / Down    Navigate inside the focused panel",
                     "k at the top          Focus the main panel selector",
                     "h/l in selector       Switch view; j/Enter enters it",
                     "Enter                 Activate the highlighted control",
