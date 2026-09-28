@@ -181,6 +181,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     _ => { redraw = false; None },
                 };
                 let action = match action {
+                    Some(Action::CycleFocus(forward)) => { ui.cycle_region(&mut app, forward); None },
                     Some(Action::Navigate(direction)) => { ui.navigate_control(&mut app, direction); None },
                     Some(Action::Activate) if app.modal.is_none() => ui.focused_action(&app).or(Some(Action::Activate)),
                     other => other,
@@ -376,6 +377,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         }
         Action::AddProfile => app.open_form(FormKind::Profile),
         Action::Search => {
+            app.switch_view(crate::app::View::Activity);
             app.open_form(FormKind::Search);
             if let Some(Modal::Form(form)) = &mut app.modal {
                 form.fields[0].insert(&app.filter);
@@ -436,6 +438,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         }
         Action::Refresh => services.command(Command::Refresh),
         Action::Older => {
+            app.switch_view(crate::app::View::Activity);
             app.pane = Pane::Wallet;
             app.tab = crate::app::Tab::Transactions;
             if app.history_loading {

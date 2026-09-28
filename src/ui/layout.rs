@@ -8,13 +8,17 @@ use ratatui::{
 
 use super::{Ui, theme::Theme};
 use crate::{
-    app::{Action, App, Pane},
+    app::{Action, App, Pane, View},
     model::clean_text,
 };
 
 impl Ui {
     pub(super) fn workspace(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let single_pane = app.zoomed || area.width < 80;
+        if app.view != View::Overview {
+            self.adaptive_pane(frame, app, area, app.view.pane(), theme);
+            return;
+        }
+        let single_pane = area.width < 80;
         if single_pane && app.pane == Pane::Logs {
             self.adaptive_pane(frame, app, area, app.pane, theme);
             return;
@@ -213,6 +217,43 @@ mod tests {
     use super::*;
     use crate::{config::Config, demo};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn dedicated_views_show_only_their_own_content_and_tab_does_not_change_view() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        demo::populate(&mut app);
+        for (width, height) in [(60, 10), (90, 22), (140, 42)] {
+            for view in [View::Wallets, View::Activity, View::Network, View::Logs] {
+                app.switch_view(view);
+                let mut ui = Ui::default();
+                Terminal::new(TestBackend::new(width, height))
+                    .unwrap()
+                    .draw(|frame| ui.draw(frame, &app))
+                    .unwrap();
+                let panels: Vec<_> = ui
+                    .hits
+                    .iter()
+                    .filter_map(|hit| {
+                        if let Action::Focus(pane) = hit.action {
+                            Some(pane)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert_eq!(panels, vec![view.pane()]);
+                assert!(
+                    !ui.hits
+                        .iter()
+                        .any(|hit| matches!(hit.action, Action::Expand(_)))
+                );
+                for _ in 0..8 {
+                    ui.cycle_region(&mut app, true);
+                    assert_eq!(app.view, view);
+                }
+            }
+        }
+    }
 
     #[test]
     fn short_and_expanded_views_keep_readable_log_context() {

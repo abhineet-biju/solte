@@ -21,7 +21,7 @@ use tachyonfx::{Effect, fx};
 
 use crate::{
     amount::format_sol,
-    app::{Action, App, Appearance, Modal, Pane, Tab},
+    app::{Action, App, Appearance, Modal, Pane, Tab, View},
     model::{clean_text, now, short},
 };
 use theme::Theme;
@@ -196,15 +196,11 @@ impl Ui {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         self.target(area, Action::Focus(pane));
-        if area.width >= 6 && area.height >= 2 {
+        if app.view == View::Overview && area.width >= 14 && area.height >= 2 {
             self.border_button(
                 frame,
-                Rect::new(area.right() - 5, area.bottom() - 1, 3, 1),
-                if app.zoomed && app.pane == pane {
-                    "−"
-                } else {
-                    "+"
-                },
+                Rect::new(area.right() - 9, area.bottom() - 1, 7, 1),
+                "Open →",
                 Action::Expand(pane),
                 theme,
             );
@@ -293,7 +289,10 @@ impl Ui {
             .unwrap_or("project");
         frame.render_widget(
             Paragraph::new(format!(
-                "  {project}  ·  {} identities  ·  {}",
+                "  {project}  ·  {}  ·  {} identities  ·  {}",
+                app.wallet()
+                    .map(|wallet| wallet.name.as_str())
+                    .unwrap_or("No wallet selected"),
                 app.wallets.len(),
                 if app.connected {
                     "connected"
@@ -302,19 +301,35 @@ impl Ui {
                 }
             ))
             .style(Style::default().fg(theme.muted)),
-            Rect::new(area.x, area.y + 1, area.width, 1),
+            Rect::new(area.x, area.y + 1, area.width.saturating_sub(22), 1),
+        );
+        self.button(
+            frame,
+            Rect::new(area.right() - 21, area.y + 1, 10, 1),
+            "Theme t",
+            Action::Theme,
+            theme,
+            false,
+        );
+        self.button(
+            frame,
+            Rect::new(area.right() - 10, area.y + 1, 10, 1),
+            "Motion m",
+            Action::Motion,
+            theme,
+            false,
         );
         let mut x = area.x + 1;
-        for (i, pane) in Pane::ALL.iter().enumerate() {
-            let label = format!("{} {}", i + 1, pane.name());
+        for (i, view) in View::ALL.iter().enumerate() {
+            let label = format!("{} {}", i + 1, view.name());
             let width = label.len() as u16 + 2;
             self.button(
                 frame,
                 Rect::new(x, area.y + 3, width.min(area.right().saturating_sub(x)), 1),
                 &label,
-                Action::Selector(*pane),
+                Action::Selector(*view),
                 theme,
-                app.pane == *pane,
+                app.view == *view,
             );
             x += width + 1;
         }
@@ -342,14 +357,7 @@ impl Ui {
     }
 
     fn wallets(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let inner = self.panel(
-            frame,
-            app,
-            area,
-            Pane::Wallets,
-            "01  Project identities",
-            theme,
-        );
+        let inner = self.panel(frame, app, area, Pane::Wallets, "Wallets", theme);
         let regions = Layout::vertical([Constraint::Min(2), Constraint::Length(5)])
             .margin(1)
             .split(inner);
@@ -445,32 +453,7 @@ impl Ui {
         if inner.height < 5 {
             return;
         }
-        let mut x = inner.x;
-        for (label, tab) in [
-            ("Overview", Tab::Overview),
-            ("Transactions", Tab::Transactions),
-            ("Settings", Tab::Settings),
-        ] {
-            let width = label.len() as u16 + 2;
-            if x + width > inner.right() {
-                break;
-            }
-            self.button(
-                frame,
-                Rect::new(x, inner.y, width, 1),
-                label,
-                Action::SetTab(tab),
-                theme,
-                app.tab == tab,
-            );
-            x += width + 1;
-        }
-        let body = Rect::new(
-            inner.x,
-            inner.y + 2,
-            inner.width,
-            inner.height.saturating_sub(2),
-        );
+        let body = inner;
         if app.tab == Tab::Settings {
             self.settings(frame, app, body, theme);
             return;
@@ -780,7 +763,7 @@ impl Ui {
 
     fn network(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self
-            .panel(frame, app, area, Pane::Network, "03  RPC / Network", theme)
+            .panel(frame, app, area, Pane::Network, "Network", theme)
             .inner(ratatui::layout::Margin::new(1, 0));
         let n = app.network.as_ref();
         let text = |label: &str, value: String, color| {
@@ -900,7 +883,7 @@ impl Ui {
 
     fn logs(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self
-            .panel(frame, app, area, Pane::Logs, "04  Session log", theme)
+            .panel(frame, app, area, Pane::Logs, "Logs", theme)
             .inner(ratatui::layout::Margin::new(1, 0));
         if area.width > 44 {
             self.border_button(
@@ -1444,14 +1427,13 @@ impl Ui {
             Modal::Help { scroll } => {
                 let lines = [
                     "NAVIGATION",
-                    "Tab / Shift-Tab       Next / previous panel",
-                    "1 / 2 / 3 / 4         Wallets / activity / network / logs",
+                    "Tab / Shift-Tab       Focus regions in this view",
+                    "1–5                   Overview / Wallets / Activity / Network / Logs",
                     "h j k l / arrows      Navigate inside the focused panel",
                     "k at the top          Focus the main panel selector",
-                    "h/l in selector       Select panel; j/Enter enters it",
+                    "h/l in selector       Switch view; j/Enter enters it",
                     "Enter                 Activate the highlighted control",
-                    "z                     Expand or restore focused panel",
-                    "v                     Cycle Overview / Transactions / Settings",
+                    "z                     Open focused summary / return to Overview",
                     "",
                     "WALLET",
                     "n  New keypair         i  Import keypair",
@@ -1698,7 +1680,7 @@ mod tests {
                 assert_focus(&terminal, &ui, Action::Import, theme);
                 app.selector_focus = true;
                 terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
-                assert_focus(&terminal, &ui, Action::Selector(Pane::Wallet), theme);
+                assert_focus(&terminal, &ui, Action::Selector(View::Overview), theme);
                 app.modal = Some(Modal::Appearance {
                     kind: Appearance::Theme,
                     selected: 0,
@@ -1841,7 +1823,7 @@ mod tests {
             assert!(
                 ui.hits
                     .iter()
-                    .any(|h| h.action == Action::Selector(Pane::Network))
+                    .any(|h| h.action == Action::Selector(View::Network))
             );
             assert!(
                 ui.hits

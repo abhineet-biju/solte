@@ -30,6 +30,50 @@ impl Pane {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Overview,
+    Wallets,
+    Activity,
+    Network,
+    Logs,
+}
+
+impl View {
+    pub const ALL: [Self; 5] = [
+        Self::Overview,
+        Self::Wallets,
+        Self::Activity,
+        Self::Network,
+        Self::Logs,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Wallets => "Wallets",
+            Self::Activity => "Activity",
+            Self::Network => "Network",
+            Self::Logs => "Logs",
+        }
+    }
+    pub fn pane(self) -> Pane {
+        match self {
+            Self::Overview | Self::Activity => Pane::Wallet,
+            Self::Wallets => Pane::Wallets,
+            Self::Network => Pane::Network,
+            Self::Logs => Pane::Logs,
+        }
+    }
+    pub fn for_pane(pane: Pane) -> Self {
+        match pane {
+            Pane::Wallet => Self::Activity,
+            Pane::Wallets => Self::Wallets,
+            Pane::Network => Self::Network,
+            Pane::Logs => Self::Logs,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Overview,
     Transactions,
@@ -61,7 +105,7 @@ pub enum Action {
     ForceQuit,
     Quit,
     Focus(Pane),
-    Selector(Pane),
+    Selector(View),
     CycleFocus(bool),
     Navigate(Direction),
     Move(i32),
@@ -304,6 +348,8 @@ pub struct App {
     pub selected_wallet: usize,
     pub wallet_cursor: usize,
     pub pane: Pane,
+    pub view: View,
+    view_focus: [Option<(Pane, Option<Action>)>; 5],
     pub focused_control: Option<Action>,
     pub selector_focus: bool,
     pub tab: Tab,
@@ -346,6 +392,8 @@ impl App {
             selected_wallet,
             wallet_cursor: selected_wallet,
             pane: Pane::Wallet,
+            view: View::Overview,
+            view_focus: std::array::from_fn(|_| None),
             focused_control: None,
             selector_focus: false,
             tab: Tab::Overview,
@@ -373,6 +421,24 @@ impl App {
             zoomed: false,
             demo: false,
         }
+    }
+
+    pub fn switch_view(&mut self, view: View) {
+        if view != self.view {
+            self.view_focus[self.view as usize] = Some((self.pane, self.focused_control.clone()));
+            self.view = view;
+            let (pane, focus) = self.view_focus[view as usize]
+                .clone()
+                .unwrap_or((view.pane(), None));
+            self.pane = pane;
+            self.focused_control = focus;
+        }
+        self.tab = if view == View::Activity {
+            Tab::Transactions
+        } else {
+            Tab::Overview
+        };
+        self.zoomed = false;
     }
 
     pub fn log_transport(&self) -> &'static str {
@@ -509,10 +575,11 @@ impl App {
             KeyCode::Char('q') => Some(Action::Quit),
             KeyCode::Tab => Some(Action::CycleFocus(true)),
             KeyCode::BackTab => Some(Action::CycleFocus(false)),
-            KeyCode::Char('1') => Some(Action::Focus(Pane::Wallets)),
-            KeyCode::Char('2') => Some(Action::Focus(Pane::Wallet)),
-            KeyCode::Char('3') => Some(Action::Focus(Pane::Network)),
-            KeyCode::Char('4') => Some(Action::Focus(Pane::Logs)),
+            KeyCode::Char('1') => Some(Action::Selector(View::Overview)),
+            KeyCode::Char('2') => Some(Action::Selector(View::Wallets)),
+            KeyCode::Char('3') => Some(Action::Selector(View::Activity)),
+            KeyCode::Char('4') => Some(Action::Selector(View::Network)),
+            KeyCode::Char('5') => Some(Action::Selector(View::Logs)),
             KeyCode::Down | KeyCode::Char('j' | 'J') => Some(Action::Navigate(Direction::Down)),
             KeyCode::Up | KeyCode::Char('k' | 'K') => Some(Action::Navigate(Direction::Up)),
             KeyCode::PageDown => Some(Action::Move(10)),
@@ -539,11 +606,6 @@ impl App {
             KeyCode::Char('z') => Some(Action::Zoom),
             KeyCode::Char(']') => Some(Action::NextWallet),
             KeyCode::Char('b') => Some(Action::Older),
-            KeyCode::Char('v') => Some(Action::SetTab(match self.tab {
-                Tab::Overview => Tab::Transactions,
-                Tab::Transactions => Tab::Settings,
-                Tab::Settings => Tab::Overview,
-            })),
             KeyCode::Esc => Some(Action::Close),
             _ => None,
         }
@@ -564,11 +626,8 @@ impl App {
                 self.pane = Pane::ALL[(index + if forward { 1 } else { 3 }) % 4];
                 self.focused_control = None;
             }
-            Action::Selector(pane) => {
-                if self.pane != pane {
-                    self.focused_control = None;
-                }
-                self.pane = pane;
+            Action::Selector(view) => {
+                self.switch_view(view);
                 self.selector_focus = true;
             }
             Action::SetTab(tab) => {
@@ -643,6 +702,7 @@ impl App {
             }
             Action::Failures => {
                 self.failures_only = !self.failures_only;
+                self.switch_view(View::Activity);
                 self.pane = Pane::Wallet;
                 self.tab = Tab::Transactions;
                 self.status = if self.failures_only {
@@ -659,10 +719,17 @@ impl App {
                 self.transaction_cursor = 0;
             }
             Action::Help => self.modal = Some(Modal::Help { scroll: 0 }),
-            Action::Zoom => self.zoomed = !self.zoomed,
+            Action::Zoom => {
+                self.switch_view(if self.view == View::Overview {
+                    View::for_pane(self.pane)
+                } else {
+                    View::Overview
+                });
+                self.selector_focus = false;
+            }
             Action::Expand(pane) => {
-                self.zoomed = !(self.zoomed && self.pane == pane);
-                self.pane = pane;
+                self.switch_view(View::for_pane(pane));
+                self.selector_focus = false;
             }
             Action::Close => {
                 if self.modal.take().is_none() {
@@ -682,6 +749,23 @@ fn move_index(index: usize, delta: i32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn views_restore_focus_without_losing_filters_or_scroll() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        app.switch_view(View::Activity);
+        app.focused_control = Some(Action::Failures);
+        app.filter = "transfer".into();
+        app.transaction_cursor = 4;
+        app.switch_view(View::Network);
+        app.network_scroll = 3;
+        app.switch_view(View::Activity);
+        assert_eq!(app.focused_control, Some(Action::Failures));
+        assert_eq!(app.transaction_cursor, 4);
+        assert_eq!(app.filter, "transfer");
+        app.switch_view(View::Network);
+        assert_eq!(app.network_scroll, 3);
+    }
 
     #[test]
     fn dialog_dismissal_preserves_layout_and_search_can_be_cleared() {

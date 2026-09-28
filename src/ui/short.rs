@@ -3,7 +3,7 @@ use ratatui::{Frame, layout::Rect, style::Style, widgets::Paragraph};
 use super::{Ui, theme::Theme};
 use crate::{
     amount::format_sol,
-    app::{Action, App, Form, Pane, Tab},
+    app::{Action, App, Form, Pane, Tab, View},
     model::{clean_text, short},
 };
 
@@ -11,7 +11,10 @@ impl Ui {
     pub(super) fn short_layout(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         frame.render_widget(
             Paragraph::new(format!(
-                " SOLTE  ·  {}{}",
+                " SOLTE · {} · {}{}",
+                app.wallet()
+                    .map(|wallet| wallet.name.as_str())
+                    .unwrap_or("No wallet"),
                 app.profile().name,
                 if app.demo { "  ·  DEMO" } else { "" }
             ))
@@ -35,16 +38,16 @@ impl Ui {
             false,
         );
         let mut x = area.x;
-        for (i, pane) in Pane::ALL.iter().enumerate() {
-            let label = format!("{} {}", i + 1, pane.name());
+        for (i, view) in View::ALL.iter().enumerate() {
+            let label = format!("{} {}", i + 1, view.name());
             let width = label.len() as u16 + 2;
             self.button(
                 frame,
                 Rect::new(x, area.y + 1, width, 1),
                 &label,
-                Action::Selector(*pane),
+                Action::Selector(*view),
                 theme,
-                app.pane == *pane,
+                app.view == *view,
             );
             x += width + 1;
         }

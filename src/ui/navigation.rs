@@ -1,7 +1,7 @@
 use ratatui::{Frame, layout::Rect};
 
 use super::{Hit, Ui, theme::Theme};
-use crate::app::{Action, App, Direction, Modal, Pane, Tab};
+use crate::app::{Action, App, Direction, Modal, Pane, Tab, View};
 
 impl Ui {
     fn pane_area(&self, pane: Pane) -> Option<Rect> {
@@ -69,23 +69,37 @@ impl Ui {
         Some(action)
     }
 
+    pub fn cycle_region(&self, app: &mut App, forward: bool) {
+        let panes: Vec<_> = Pane::ALL
+            .into_iter()
+            .filter(|pane| self.pane_area(*pane).is_some())
+            .collect();
+        if app.selector_focus {
+            app.selector_focus = false;
+            if let Some(pane) = if forward { panes.first() } else { panes.last() } {
+                app.pane = *pane;
+            }
+        } else if let Some(index) = panes.iter().position(|pane| *pane == app.pane) {
+            if (forward && index + 1 == panes.len()) || (!forward && index == 0) {
+                app.selector_focus = true;
+            } else {
+                app.pane = panes[if forward { index + 1 } else { index - 1 }];
+            }
+        }
+        app.focused_control = None;
+    }
+
     pub fn navigate_control(&self, app: &mut App, direction: Direction) {
         if app.selector_focus {
             match direction {
                 Direction::Left | Direction::Right => {
-                    let index = Pane::ALL
-                        .iter()
-                        .position(|pane| *pane == app.pane)
-                        .unwrap_or(0);
+                    let index = app.view as usize;
                     let next = if direction == Direction::Left {
                         index.saturating_sub(1)
                     } else {
-                        (index + 1).min(Pane::ALL.len() - 1)
+                        (index + 1).min(View::ALL.len() - 1)
                     };
-                    if next != index {
-                        app.focused_control = None;
-                    }
-                    app.pane = Pane::ALL[next];
+                    app.switch_view(View::ALL[next]);
                 }
                 Direction::Down => app.selector_focus = false,
                 Direction::Up => {}
@@ -168,7 +182,7 @@ impl Ui {
                 Some(Action::Submit)
             }
             Some(_) => None,
-            None if app.selector_focus => Some(Action::Selector(app.pane)),
+            None if app.selector_focus => Some(Action::Selector(app.view)),
             None => self.focused_action(app),
         };
         if let Some(action) = action {
@@ -235,10 +249,8 @@ mod tests {
         render(&mut ui, &app, 160, 48);
         ui.navigate_control(&mut app, Direction::Right);
         assert_eq!(app.pane, Pane::Wallet);
-        assert_eq!(app.focused_control, Some(Action::SetTab(Tab::Transactions)));
-        app.navigate(&ui.focused_action(&app).unwrap());
-        assert_eq!(app.tab, Tab::Transactions);
-        app.navigate(&Action::SetTab(Tab::Overview));
+        assert_eq!(app.focused_control, Some(Action::Send));
+        assert_eq!(app.view, View::Overview);
         app.focused_control = Some(Action::Fund);
         render(&mut ui, &app, 160, 48);
         ui.navigate_control(&mut app, Direction::Right);
@@ -333,7 +345,8 @@ mod tests {
             }
             assert!(app.selector_focus);
             ui.navigate_control(&mut app, Direction::Right);
-            assert_eq!(app.pane, Pane::Network);
+            assert_eq!(app.view, View::Wallets);
+            assert_eq!(app.pane, Pane::Wallets);
             ui.navigate_control(&mut app, Direction::Left);
             assert_eq!(app.pane, Pane::Wallet);
             ui.navigate_control(&mut app, Direction::Down);
