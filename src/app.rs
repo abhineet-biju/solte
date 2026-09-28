@@ -29,7 +29,7 @@ impl Pane {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum View {
     Overview,
     Wallets,
@@ -96,6 +96,7 @@ pub enum FormKind {
     Transfer,
     Profile,
     Search,
+    LogSearch,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -210,6 +211,7 @@ impl Form {
                 Field::new("HTTP RPC endpoint", "http://127.0.0.1:8899"),
                 Field::new("WebSocket endpoint", "ws://127.0.0.1:8900"),
             ],
+            FormKind::LogSearch => vec![Field::new("Message or level", "")],
             FormKind::Search => vec![Field::new("Signature, instruction, or error", "")],
         };
         Self {
@@ -227,6 +229,7 @@ impl Form {
             FormKind::Transfer => "Send SOL",
             FormKind::Profile => "Add RPC profile",
             FormKind::Search => "Filter transactions",
+            FormKind::LogSearch => "Filter logs",
         }
     }
     pub fn submit_label(&self) -> &'static str {
@@ -236,7 +239,7 @@ impl Form {
             FormKind::Fund => "Request airdrop",
             FormKind::Transfer => "Simulate & review",
             FormKind::Profile => "Save profile",
-            FormKind::Search => "Apply filter",
+            FormKind::Search | FormKind::LogSearch => "Apply filter",
         }
     }
     pub fn key(&mut self, key: KeyEvent) -> Option<Action> {
@@ -362,6 +365,7 @@ pub struct App {
     pub modal_scroll_limit: u16,
     pub logs: VecDeque<LogEntry>,
     pub log_scroll: usize,
+    pub log_filter: String,
     pub follow: bool,
     pub network: Option<NetworkState>,
     pub network_scroll: u16,
@@ -406,6 +410,7 @@ impl App {
             modal_scroll_limit: 0,
             logs: VecDeque::new(),
             log_scroll: 0,
+            log_filter: String::new(),
             follow: true,
             network: None,
             network_scroll: 0,
@@ -696,7 +701,12 @@ impl App {
                 self.log_scroll = 0;
             }
             Action::ClearFilter => {
-                self.filter.clear();
+                if self.view == View::Logs {
+                    self.log_filter.clear();
+                    self.log_scroll = 0;
+                } else {
+                    self.filter.clear();
+                }
                 self.transaction_cursor = 0;
                 self.status = "Search cleared".into();
             }

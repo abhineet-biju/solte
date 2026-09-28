@@ -50,27 +50,28 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 
 | Action | Keys |
 |---|---|
-| Switch panels | Tab / Shift-Tab |
-| Jump to wallets / activity / network / logs | 1 / 2 / 3 / 4 |
+| Move focus within the current view | Tab / Shift-Tab |
+| Overview / Wallets / Activity / Network / Logs | 1 / 2 / 3 / 4 / 5 |
 | Navigate options within the focused panel | h / j / k / l, or arrow keys |
 | Scroll the current list or view | Page Up / Page Down |
 | Activate the focused option | Enter |
 | Create / import / cycle identity | n / i / ] |
 | Funding options / send SOL | f / s |
 | RPC profiles / refresh | p / r |
-| Filter transactions / failures only | / / e |
+| Search current Activity or Logs view / transaction failures | / / e |
 | Fetch or load older records | b |
 | Open transaction explorer / copy wallet address | o / y |
 | Clear transaction search | x |
 | Follow logs / clear visible logs | F / C |
-| Cycle activity tabs | v |
 | Choose theme / motion | t / m |
-| Expand focused panel | z, or the panel's + button |
+| Open focused summary / return to Overview | z, or Open → |
 | Help / close dialog / quit | ? / Escape / q |
 
-Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. The RPC sidebar stays visible from 80 columns, and the identity sidebar joins it from 100 columns, including in short panes. Narrower windows show the focused panel; the top navigation keeps every panel accessible. Short panes use a compact header, single-row wallet controls, and scrollable activity. A compact session log remains visible when there is enough vertical room, including when a pane is expanded. Expanding the log itself uses the full workspace. Short dialogs show one field at a time with Previous and Next controls. The minimum supported size is 60 columns by 10 rows; 120 by 36 or larger provides more room. Below the minimum, Solte reports the actual column and row count.
+The top bar switches between distinct views. Overview combines wallet, activity, network, and log summaries; Wallets, Activity, Network, and Logs use the workspace for their own content. Overview's Open → links lead to the corresponding full view. At narrower widths Overview reduces the number of summaries while all five views remain accessible. The minimum size is 60 columns by 10 rows.
 
-The highlighted control has keyboard focus. Directional navigation stays inside the selected panel until you press k/up at its top edge. This focuses the main selector: h/l selects a panel, and j/down or Enter enters it. Enter on a control activates the same action as a mouse click. In text fields, type normally, use left/right to move the cursor, and Tab/Shift-Tab to change fields.
+The highlighted control has keyboard focus. Use k/up at the top of a page to reach the view selector, h/l to switch views, and j/down or Enter to enter the page. Tab and Shift-Tab move between visible focus regions without changing views. Clicks and Enter invoke the same actions. Forms accept normal text input, arrow keys move the cursor, and Tab switches fields. Each view preserves its navigation state; Activity and Logs have separate search filters.
+
+Use `solte --view network` to open a particular view. `--view` also works with `--demo` and `--snapshot` for reproducible previews.
 
 ## Local data and monitoring
 
@@ -123,6 +124,6 @@ These checks only accept loopback RPC endpoints and create disposable keypairs. 
 
 The source is organized around wallet operations, network monitoring, local storage, application state, rendering, and runtime coordination. Rendering does no network or disk I/O. A session identifier prevents stale responses from updating a newly selected wallet or profile.
 
-Transaction inspectors support Home/End and bounded scrolling with a position indicator. Escape closes a dialog without changing the underlying expanded layout. In offline mode, funding and sending explain their unavailability before opening a form.
+Transaction inspectors support Home/End and bounded scrolling with a position indicator. Escape closes a dialog without changing the underlying view. In offline mode, funding and sending explain their unavailability before opening a form.
 
-Interaction styling is shared across all themes: a solid accent background marks the focused control or editable field; muted backgrounds and accent text indicate selection without focus. Wallet activity, errors, and connection health retain explicit symbols or labels. Moving focus never changes the active wallet until it is activated. Dialogs own focus while open, and closing them restores the underlying pane and focus. In forms, the highlighted field receives typing; Enter submits the form.
+Interaction styling is shared across all themes: a solid accent background marks the focused control or editable field; muted backgrounds and accent text indicate selection without focus. Wallet activity, errors, and connection health retain explicit symbols or labels. Moving focus never changes the active wallet until it is activated. Dialogs own focus while open, and closing them restores the underlying view and focus. In forms, the highlighted field receives typing; Enter submits the form.

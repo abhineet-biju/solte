@@ -377,10 +377,22 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         }
         Action::AddProfile => app.open_form(FormKind::Profile),
         Action::Search => {
-            app.switch_view(crate::app::View::Activity);
-            app.open_form(FormKind::Search);
+            let logs = app.view == crate::app::View::Logs;
+            if !logs {
+                app.switch_view(crate::app::View::Activity);
+            }
+            let value = if logs {
+                app.log_filter.clone()
+            } else {
+                app.filter.clone()
+            };
+            app.open_form(if logs {
+                FormKind::LogSearch
+            } else {
+                FormKind::Search
+            });
             if let Some(Modal::Form(form)) = &mut app.modal {
-                form.fields[0].insert(&app.filter);
+                form.fields[0].insert(&value);
             }
         }
         Action::SelectWallet(index) => {
@@ -581,9 +593,14 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
         return Ok(());
     }
     if let Some(Modal::Form(form)) = &app.modal
-        && form.kind == FormKind::Search
+        && matches!(form.kind, FormKind::Search | FormKind::LogSearch)
     {
-        app.filter = form.fields[0].value.trim().to_owned();
+        if form.kind == FormKind::LogSearch {
+            app.log_filter = form.fields[0].value.trim().to_owned();
+            app.log_scroll = 0;
+        } else {
+            app.filter = form.fields[0].value.trim().to_owned();
+        }
         app.transaction_cursor = 0;
         app.modal = None;
         return Ok(());
@@ -704,7 +721,7 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
             services.save(app).await;
             services.restart(app);
         }
-        FormKind::Search => {
+        FormKind::Search | FormKind::LogSearch => {
             app.filter = values[0].clone();
             app.transaction_cursor = 0;
             app.modal = None;

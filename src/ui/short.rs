@@ -12,10 +12,10 @@ impl Ui {
         frame.render_widget(
             Paragraph::new(format!(
                 " SOLTE · {} · {}{}",
+                app.profile().name,
                 app.wallet()
                     .map(|wallet| wallet.name.as_str())
                     .unwrap_or("No wallet"),
-                app.profile().name,
                 if app.demo { "  ·  DEMO" } else { "" }
             ))
             .style(Style::default().fg(theme.accent)),

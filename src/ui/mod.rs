@@ -446,8 +446,8 @@ impl Ui {
     fn wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let title = app
             .wallet()
-            .map(|w| format!("02  {}", clean_text(&w.name)))
-            .unwrap_or_else(|| "02  Your development session".into());
+            .map(|w| format!("Activity · {}", clean_text(&w.name)))
+            .unwrap_or_else(|| "Wallet overview".into());
         let inner = self.panel(frame, app, area, Pane::Wallet, &title, theme);
         let inner = inner.inner(ratatui::layout::Margin::new(1, 0));
         if inner.height < 5 {
@@ -462,6 +462,48 @@ impl Ui {
             self.welcome(frame, body, theme);
             return;
         };
+        if app.view == View::Activity {
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{} · {} SOL · {}",
+                    clean_text(&wallet.name),
+                    app.balance.map(format_sol).unwrap_or_else(|| "—".into()),
+                    short(&wallet.address)
+                ))
+                .style(Style::default().fg(theme.green)),
+                Rect::new(body.x, body.y, body.width, 1),
+            );
+            let mut x = body.x;
+            for (label, action) in [
+                ("Fund f", Action::Fund),
+                ("Send s", Action::Send),
+                ("Copy y", Action::CopyAddress),
+                ("Explorer", Action::ExplorerWallet),
+            ] {
+                let width = label.len() as u16 + 2;
+                self.button(
+                    frame,
+                    Rect::new(x, body.y + 1, width, 1),
+                    label,
+                    action,
+                    theme,
+                    false,
+                );
+                x += width + 1;
+            }
+            self.transactions(
+                frame,
+                app,
+                Rect::new(
+                    body.x,
+                    body.y + 3,
+                    body.width,
+                    body.height.saturating_sub(3),
+                ),
+                theme,
+            );
+            return;
+        }
         if app.tab == Tab::Overview && body.height >= 18 {
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
@@ -848,37 +890,71 @@ impl Ui {
                 theme.text,
             ),
         ];
+        let lines = if inner.height < 14 {
+            vec![
+                text(
+                    "Cluster",
+                    n.map(|n| n.cluster.clone())
+                        .unwrap_or_else(|| app.profile().name.clone()),
+                    theme.accent,
+                ),
+                text(
+                    "RPC",
+                    if app.connected {
+                        "Connected"
+                    } else {
+                        "Offline"
+                    }
+                    .into(),
+                    theme.text,
+                ),
+                text(
+                    "Latency",
+                    n.map(|n| format!("{} ms", n.latency_ms))
+                        .unwrap_or_else(|| "—".into()),
+                    theme.text,
+                ),
+                text("Slot", number(n.map(|n| n.slot)), theme.text),
+                text("Block", number(n.map(|n| n.block_height)), theme.text),
+                text("Epoch", number(n.map(|n| n.epoch)), theme.text),
+                text("Wallet logs", app.log_transport().into(), theme.text),
+                Line::from(app.profile().display_endpoint()),
+            ]
+        } else {
+            lines
+        };
         let content = Rect::new(
             inner.x,
             inner.y,
             inner.width,
-            inner.height.saturating_sub(4),
+            inner.height.saturating_sub(1),
         );
+        let paragraph = Paragraph::new(lines)
+            .style(Style::default().fg(theme.text))
+            .wrap(Wrap { trim: false });
+        let limit = paragraph
+            .line_count(content.width)
+            .saturating_sub(content.height as usize) as u16;
         frame.render_widget(
-            Paragraph::new(lines)
-                .style(Style::default().fg(theme.text))
-                .wrap(Wrap { trim: false })
-                .scroll((app.network_scroll, 0)),
+            paragraph.scroll((app.network_scroll.min(limit), 0)),
             content,
         );
-        if inner.height >= 5 {
-            self.button(
-                frame,
-                Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
-                "RPC profiles   p",
-                Action::Profiles,
-                theme,
-                false,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-                "Refresh        r",
-                Action::Refresh,
-                theme,
-                false,
-            );
-        }
+        self.button(
+            frame,
+            Rect::new(inner.x, inner.bottom() - 1, 18, 1),
+            "RPC profiles p",
+            Action::Profiles,
+            theme,
+            false,
+        );
+        self.button(
+            frame,
+            Rect::new(inner.x + 20, inner.bottom() - 1, 13, 1),
+            "Refresh r",
+            Action::Refresh,
+            theme,
+            false,
+        );
     }
 
     fn logs(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
@@ -905,10 +981,70 @@ impl Ui {
                 theme,
             );
         }
-        let end = app.logs.len().saturating_sub(app.log_scroll);
-        let start = end.saturating_sub(inner.height as usize);
-        let lines: Vec<_> = app
+        let query = if app.view == View::Logs {
+            app.log_filter.to_lowercase()
+        } else {
+            String::new()
+        };
+        let entries: Vec<_> = app
             .logs
+            .iter()
+            .filter(|entry| {
+                query.is_empty()
+                    || entry.message.to_lowercase().contains(&query)
+                    || entry.level.to_lowercase().contains(&query)
+            })
+            .collect();
+        let inner = if app.view == View::Logs {
+            self.button(
+                frame,
+                Rect::new(inner.x, inner.bottom() - 1, 10, 1),
+                if query.is_empty() {
+                    "Find /"
+                } else {
+                    "Clear x"
+                },
+                if query.is_empty() {
+                    Action::Search
+                } else {
+                    Action::ClearFilter
+                },
+                theme,
+                false,
+            );
+            frame.render_widget(
+                Paragraph::new(if query.is_empty() {
+                    format!("{} entries", entries.len())
+                } else {
+                    format!(
+                        "Filter: {} · {} matches",
+                        clean_text(&app.log_filter),
+                        entries.len()
+                    )
+                })
+                .style(Style::default().fg(theme.muted)),
+                Rect::new(
+                    inner.x + 12,
+                    inner.bottom() - 1,
+                    inner.width.saturating_sub(12),
+                    1,
+                ),
+            );
+            Rect::new(
+                inner.x,
+                inner.y,
+                inner.width,
+                inner.height.saturating_sub(1),
+            )
+        } else {
+            inner
+        };
+        let end = entries.len().saturating_sub(
+            app.log_scroll
+                .min(entries.len().saturating_sub(inner.height as usize)),
+        );
+        let start = end.saturating_sub(inner.height as usize);
+        let lines: Vec<_> = entries
             .iter()
             .skip(start)
             .take(end - start)
@@ -938,7 +1074,11 @@ impl Ui {
         frame.render_widget(
             Paragraph::new(if lines.is_empty() {
                 vec![Line::from(Span::styled(
-                    "Ready. Wallet actions and connection events appear here.",
+                    if query.is_empty() {
+                        "Ready. Wallet actions and connection events appear here."
+                    } else {
+                        "No matching logs. Press x to clear the filter."
+                    },
                     Style::default().fg(theme.muted),
                 ))]
             } else {
@@ -1265,7 +1405,7 @@ impl Ui {
                     crate::app::FormKind::Profile => {
                         "Profiles are stored locally in .solte/config.toml."
                     }
-                    crate::app::FormKind::Search => {
+                    crate::app::FormKind::Search | crate::app::FormKind::LogSearch => {
                         "Leave empty to show all captured transactions."
                     }
                 });

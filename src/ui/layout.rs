@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, BorderType, Paragraph, Wrap},
 };
 
 use super::{Ui, theme::Theme};
@@ -14,6 +14,52 @@ use crate::{
 
 impl Ui {
     pub(super) fn workspace(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
+        if app.view == View::Wallets && area.width >= 90 {
+            let left = Rect::new(area.x, area.y, 34, area.height);
+            self.adaptive_pane(frame, app, left, Pane::Wallets, theme);
+            let right = Rect::new(left.right() + 1, area.y, area.width - 35, area.height);
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .title(" Identity details ")
+                .border_style(Style::default().fg(theme.border))
+                .style(Style::default().bg(theme.panel));
+            let inner = block.inner(right).inner(ratatui::layout::Margin::new(1, 0));
+            frame.render_widget(block, right);
+            let lines = if let Some(wallet) = app.wallets.get(app.wallet_cursor) {
+                vec![
+                    Line::from(Span::styled(
+                        clean_text(&wallet.name),
+                        Style::default().fg(theme.accent).bold(),
+                    )),
+                    Line::from(if app.wallet_cursor == app.selected_wallet {
+                        "Active wallet"
+                    } else {
+                        "Enter or click to make active"
+                    }),
+                    Line::from(""),
+                    Line::from("PUBLIC ADDRESS"),
+                    Line::from(wallet.address.clone()),
+                    Line::from(""),
+                    Line::from(if wallet.program {
+                        "Program identity · read-only"
+                    } else {
+                        "Standard Solana keypair"
+                    }),
+                    Line::from(""),
+                    Line::from("KEY FILE"),
+                    Line::from(clean_text(&wallet.path.display().to_string())),
+                ]
+            } else {
+                vec![Line::from("Create or import an identity to get started.")]
+            };
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .wrap(Wrap { trim: false })
+                    .style(Style::default().fg(theme.text)),
+                inner,
+            );
+            return;
+        }
         if app.view != View::Overview {
             self.adaptive_pane(frame, app, area, app.view.pane(), theme);
             return;
@@ -217,6 +263,30 @@ mod tests {
     use super::*;
     use crate::{config::Config, demo};
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn log_filter_is_independent_of_transaction_filter() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        demo::populate(&mut app);
+        app.filter = "transfer".into();
+        app.log_filter = "insufficient".into();
+        app.switch_view(View::Logs);
+        let mut ui = Ui::default();
+        let mut terminal = Terminal::new(TestBackend::new(90, 22)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Filter: insufficient"));
+        assert!(!text.contains("Project loaded"));
+        app.navigate(&Action::ClearFilter);
+        assert!(app.log_filter.is_empty());
+        assert_eq!(app.filter, "transfer");
+    }
 
     #[test]
     fn dedicated_views_show_only_their_own_content_and_tab_does_not_change_view() {

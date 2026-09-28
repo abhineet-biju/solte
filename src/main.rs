@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 use solte::{
-    app::App,
+    app::{App, View},
     config::{Config, project_root},
     demo, network, runtime, ui, wallet,
 };
@@ -16,6 +16,8 @@ use solte::{
 struct Args {
     #[arg(short, long, default_value = ".")]
     project: PathBuf,
+    #[arg(long, value_enum, default_value_t = View::Overview)]
+    view: View,
     #[arg(long, help = "Use a saved RPC profile by name")]
     profile: Option<String>,
     #[arg(long, help = "Show cached history without making network requests")]
@@ -90,6 +92,7 @@ async fn main() -> Result<()> {
     if args.demo {
         demo::populate(&mut app);
     }
+    app.switch_view(args.view);
     if let Some(path) = args.snapshot {
         ui::snapshot(&app, &path, args.width, args.height)?;
         println!("Saved {}", path.display());
