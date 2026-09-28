@@ -1,0 +1,16 @@
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.33.0"
+# Channel orchestration lives in our reusable GitHub workflow; dist owns packaging.
+ci = []
+hosting = ["github"]
+installers = ["shell"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+install-path = "~/.local/bin"
+install-updater = false
+checksum = "sha256"
+unix-archive = ".tar.xz"
+source-tarball = false
+include = ["docs/key-handling.md"]

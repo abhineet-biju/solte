@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
 description = "A project-aware Solana development wallet for the terminal"
+repository = "https://github.com/abhineet-biju/solte"
+readme = "README.md"
+license = "MIT"
 
 [dependencies]
 anyhow = "1"
@@ -46,3 +49,8 @@ zeroize = "1.9"
 [profile.release]
 lto = "thin"
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
