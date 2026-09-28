@@ -14,7 +14,7 @@ use crate::{
 
 impl Ui {
     pub(super) fn workspace(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        if app.zoomed || area.width < 88 {
+        if app.zoomed || area.width < 80 {
             self.adaptive_pane(frame, app, area, app.pane, theme);
             return;
         }
@@ -30,7 +30,7 @@ impl Ui {
             area.height - if logs_height > 0 { logs_height + 1 } else { 0 },
         );
         let sidebar = Rect::new(top.right() - 26, top.y, 26, top.height);
-        let left_width = if area.width >= 112 { 22 } else { 0 };
+        let left_width = if area.width >= 100 { 22 } else { 0 };
         let center_x = area.x + if left_width > 0 { left_width + 1 } else { 0 };
         let center = Rect::new(center_x, top.y, sidebar.x - center_x - 1, top.height);
         if left_width > 0 {
@@ -215,7 +215,14 @@ mod tests {
     fn wide_short_terminals_keep_the_network_sidebar_visible() {
         let mut app = App::new("/test".into(), Config::default(), vec![]);
         demo::populate(&mut app);
-        for (width, height) in [(88, 10), (100, 14), (112, 10), (160, 16), (180, 22)] {
+        for (width, height) in [
+            (80, 10),
+            (88, 10),
+            (100, 14),
+            (100, 10),
+            (160, 16),
+            (180, 22),
+        ] {
             let mut ui = Ui::default();
             Terminal::new(TestBackend::new(width, height))
                 .unwrap()
@@ -229,7 +236,7 @@ mod tests {
             assert_eq!(network.area.width, 26);
             assert_eq!(network.area.right(), width);
             assert!(ui.hits.iter().any(|h| h.action == Action::Fund));
-            if width >= 112 {
+            if width >= 100 {
                 assert!(
                     ui.hits
                         .iter()

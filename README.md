@@ -40,7 +40,9 @@ Solte discovers the nearest project through `.solte/config.toml`, `Anchor.toml`,
 
 Create a wallet with `n` or **New identity**. New keys use standard Solana JSON in `.solte/keys/`; existing names are never overwritten. Imported keys stay at their original paths. Both remain usable with Anchor and the Solana CLI.
 
-Use `f` to request SOL. Use `s` to enter a recipient and amount, inspect an unsigned simulation, then explicitly sign and submit. The review shows the network, amount, fee, compute usage, and available program logs. A failed simulation cannot be submitted. When confirmation is uncertain, Solte keeps the signature so you can check it before retrying.
+On Devnet, `f` opens a funding menu: the official Solana faucet with your public address prefilled, Quicknode with address copying, or a direct request through the current RPC. Web requests require you to complete the faucet's verification in your browser. Solte refreshes on terminal focus and continues monitoring your balance. A rejected direct Devnet request offers the browser choices again. Localnet uses direct RPC funding.
+
+Use `s` to enter a recipient and amount, inspect an unsigned simulation, then explicitly sign and submit. The review shows the network, amount, fee, compute usage, and available program logs. A failed simulation cannot be submitted. When confirmation is uncertain, Solte keeps the signature so you can check it before retrying.
 
 Click a transaction row or press Enter to inspect its error, logs, instructions, inner instructions, and token balance metadata. Explorer and copy actions are available by mouse and keyboard. Copy uses the terminal's OSC 52 clipboard support. Custom RPC URLs that may contain credentials are not sent to an external explorer.
 
@@ -54,7 +56,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Scroll the current list or view | Page Up / Page Down |
 | Activate the focused option | Enter |
 | Create / import / cycle identity | n / i / ] |
-| Fund / send SOL | f / s |
+| Funding options / send SOL | f / s |
 | RPC profiles / refresh | p / r |
 | Filter transactions / failures only | / / e |
 | Fetch or load older records | b |
@@ -65,7 +67,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Expand focused panel | z, or the panel's + button |
 | Help / close dialog / quit | ? / Escape / q |
 
-Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. The RPC sidebar stays visible from 88 columns, and the identity sidebar joins it from 112 columns, including in short panes. Narrower windows show the focused panel; the top navigation keeps every panel accessible. Short panes use a compact header, single-row wallet controls, and scrollable activity. Short dialogs show one field at a time with Previous and Next controls. The minimum supported size is 60 columns by 10 rows; 120 by 36 or larger provides more room. Below the minimum, Solte reports the actual column and row count.
+Buttons, tabs, wallets, transaction rows, profile choices, and form fields are clickable. The mouse wheel scrolls the panel beneath it. The RPC sidebar stays visible from 80 columns, and the identity sidebar joins it from 100 columns, including in short panes. Narrower windows show the focused panel; the top navigation keeps every panel accessible. Short panes use a compact header, single-row wallet controls, and scrollable activity. Short dialogs show one field at a time with Previous and Next controls. The minimum supported size is 60 columns by 10 rows; 120 by 36 or larger provides more room. Below the minimum, Solte reports the actual column and row count.
 
 The underlined control has keyboard focus. Directional navigation stays inside the selected panel until you press k/up at its top edge. This focuses the main selector: h/l selects a panel, and j/down or Enter enters it. Enter on a control activates the same action as a mouse click. In text fields, type normally, use left/right to move the cursor, and Tab/Shift-Tab to change fields.
 
