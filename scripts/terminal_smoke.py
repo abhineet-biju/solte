@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import signal
 import struct
 import subprocess
 import tempfile
@@ -116,6 +117,19 @@ def main():
                 send(b"p")
                 send(b"\x1b[B\r", 0.8)
                 assert "selected_profile = 1" in (root / ".solte/config.toml").read_text()
+            send(b"p")
+            for columns, rows in [(88, 10), (60, 10), (160, 48), (140, 42)]:
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+                process.send_signal(signal.SIGWINCH)
+                drain(0.3)
+                assert process.poll() is None, "Resizing a dialog stopped the application"
+            send(b"\x1b")
+            for columns, rows in [(120, 14), (88, 10), (60, 10), (140, 42)]:
+                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+                process.send_signal(signal.SIGWINCH)
+                drain(0.3)
+                assert process.poll() is None, "Resizing the workspace stopped the application"
+            assert b"\x1b[6n" not in output, "Fullscreen resizing must not query the cursor"
             send(b"q")
             process.wait(timeout=5)
             assert process.returncode == 0

@@ -162,7 +162,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                         _ => { redraw = false; None },
                     },
                     Event::Paste(text) => { app.paste(&text); None },
-                    Event::Resize(..) => { terminal.clear()?; None },
+                    Event::Resize(width, height) => { terminal.resize(ratatui::layout::Rect::new(0, 0, width, height))?; None },
                     _ => { redraw = false; None },
                 };
                 let action = match action {
