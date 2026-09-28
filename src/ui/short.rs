@@ -225,11 +225,17 @@ impl Ui {
             let rect = Rect::new(inner.x, data_y + filtered + row as u16, inner.width, 1);
             frame.render_widget(
                 Paragraph::new(format!(
-                    " {} {}  {}  slot {}",
+                    " {} {}  {}{}",
                     if record.error.is_some() { "×" } else { "✓" },
                     short(&record.signature),
                     record.kind(),
-                    record.slot
+                    if inner.width >= 52 {
+                        format!("  slot {}", record.slot)
+                    } else if inner.width >= 44 {
+                        format!("  {}", record.slot)
+                    } else {
+                        String::new()
+                    }
                 ))
                 .style(
                     Style::default()
