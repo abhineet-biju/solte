@@ -230,6 +230,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     OperationUpdate::Prepared(prepared) => { app.busy = None; app.modal = Some(Modal::Review { prepared, scroll: 0 }); ui.animate(&app); },
                     OperationUpdate::Submitted(signature) => { app.last_signature = Some(signature.clone()); app.busy = Some("Waiting for transaction confirmation…".into()); app.log("INFO", format!("Submitted {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Finished(signature) => { app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
+                    OperationUpdate::Exported(path) => { app.busy = None; app.status = format!("Signed transaction exported to {path} · not submitted"); app.log("INFO", app.status.clone()); },
                     OperationUpdate::Failed(message) => { app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
                     OperationUpdate::FundingFailed(message) => {
                         app.busy = None;

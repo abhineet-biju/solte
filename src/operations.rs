@@ -1,12 +1,16 @@
-use std::{str::FromStr, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::{Result, bail};
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_signature::Signature;
-use solana_system_interface::instruction;
-use solana_transaction::Transaction;
+use solana_transaction::versioned::VersionedTransaction;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -18,7 +22,10 @@ use crate::{
 };
 
 pub struct PreparedTransfer {
-    pub transaction: Transaction,
+    pub transaction: VersionedTransaction,
+    pub accounts: Vec<Pubkey>,
+    pub imported: bool,
+    pub export_path: Option<PathBuf>,
     pub wallet: Wallet,
     pub profile: RpcProfile,
     pub genesis: String,
@@ -35,6 +42,7 @@ pub enum OperationUpdate {
     Prepared(Box<PreparedTransfer>),
     Submitted(String),
     Finished(String),
+    Exported(String),
     Failed(String),
     FundingFailed(String),
 }
@@ -50,6 +58,23 @@ pub async fn prepare(
     recipient: &str,
     lamports: u64,
 ) -> Result<PreparedTransfer> {
+    prepare_format(
+        profile,
+        wallet,
+        recipient,
+        lamports,
+        crate::transaction::Format::Auto,
+    )
+    .await
+}
+
+pub async fn prepare_format(
+    profile: &RpcProfile,
+    wallet: &Wallet,
+    recipient: &str,
+    lamports: u64,
+    format: crate::transaction::Format,
+) -> Result<PreparedTransfer> {
     if wallet.program {
         bail!("Select a development wallet; program identities are read-only");
     }
@@ -58,42 +83,180 @@ pub async fn prepare(
     }
     let recipient = Pubkey::from_str(recipient.trim())
         .map_err(|_| anyhow::anyhow!("Recipient must be a valid Solana address"))?;
-    let sender = Pubkey::from_str(&wallet.address)?;
     let rpc = client(profile);
     let genesis = verify_development_network(&rpc).await?;
     let (blockhash, last_valid_block_height) = rpc
         .get_latest_blockhash_with_commitment(rpc.commitment())
         .await?;
-    let mut transaction = Transaction::new_with_payer(
-        &[instruction::transfer(&sender, &recipient, lamports)],
-        Some(&sender),
-    );
-    transaction.message.recent_blockhash = blockhash;
-    let simulation = rpc
-        .simulate_transaction_with_config(
-            &transaction,
-            RpcSimulateTransactionConfig {
-                sig_verify: false,
-                commitment: Some(rpc.commitment()),
-                ..Default::default()
-            },
-        )
+    let transaction = crate::transaction::transfer(
+        format,
+        &wallet.address.parse()?,
+        &recipient,
+        lamports,
+        blockhash,
+    )?;
+    let mut prepared = inspect(profile, wallet, transaction, genesis, false).await?;
+    prepared.recipient = recipient.to_string();
+    prepared.lamports = lamports;
+    prepared.last_valid_block_height = last_valid_block_height;
+    Ok(prepared)
+}
+
+pub async fn prepare_import(
+    profile: &RpcProfile,
+    wallet: &Wallet,
+    path: &Path,
+    export_path: Option<PathBuf>,
+) -> Result<PreparedTransfer> {
+    if wallet.program {
+        bail!("Program identities are read-only");
+    }
+    let path = path.to_owned();
+    let transaction =
+        tokio::task::spawn_blocking(move || crate::transaction::read(&path)).await??;
+    crate::transaction::signer_index(&transaction, wallet)?;
+    if transaction.uses_durable_nonce() {
+        bail!("Durable-nonce imports are not supported yet; the transaction was not modified");
+    }
+    let rpc = client(profile);
+    let genesis = verify_development_network(&rpc).await?;
+    if !rpc
+        .is_blockhash_valid(transaction.message.recent_blockhash(), rpc.commitment())
         .await?
+    {
+        bail!(
+            "Imported blockhash has expired; rebuild externally and collect signatures again. Solte will not modify co-signed messages."
+        );
+    }
+    let mut prepared = inspect(profile, wallet, transaction, genesis, true).await?;
+    prepared.export_path = export_path;
+    Ok(prepared)
+}
+
+async fn inspect(
+    profile: &RpcProfile,
+    wallet: &Wallet,
+    mut transaction: VersionedTransaction,
+    genesis: String,
+    imported: bool,
+) -> Result<PreparedTransfer> {
+    crate::transaction::validate(&transaction)?;
+    let rpc = client(profile);
+    let accounts = crate::transaction::resolve_accounts(&rpc, &transaction).await?;
+    let config = RpcSimulateTransactionConfig {
+        sig_verify: false,
+        commitment: Some(rpc.commitment()),
+        ..Default::default()
+    };
+    let mut simulation = rpc
+        .simulate_transaction_with_config(&transaction, config.clone())
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "{} simulation unavailable: {}. The selected format was not changed.",
+                crate::transaction::label(&transaction),
+                crate::network::safe_error(e, profile)
+            )
+        })?
         .value;
-    let fee = rpc.get_fee_for_message(&transaction.message).await?;
+    if !imported
+        && simulation.err.is_none()
+        && let VersionedMessage::V1(message) = &mut transaction.message
+    {
+        let units = simulation.units_consumed.unwrap_or(1_400_000);
+        message.config.compute_unit_limit =
+            Some((units.saturating_mul(120) / 100).clamp(1_000, 1_400_000) as u32);
+        message.config.loaded_accounts_data_size_limit = Some(
+            simulation
+                .loaded_accounts_data_size
+                .map(|bytes| bytes.saturating_add(32767) / 32768 * 32768)
+                .unwrap_or(64 * 1024 * 1024)
+                .clamp(32768, 64 * 1024 * 1024),
+        );
+        simulation = rpc
+            .simulate_transaction_with_config(&transaction, config)
+            .await?
+            .value;
+    }
+    use base64::Engine;
+    let response: serde_json::Value = rpc.send(solana_rpc_client_api::request::RpcRequest::GetFeeForMessage,
+        serde_json::json!([base64::engine::general_purpose::STANDARD.encode(transaction.message.serialize()), {"commitment":"confirmed"}])).await?;
+    let fee = response
+        .get("value")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| anyhow::anyhow!("Fee unavailable; blockhash may have expired"))?;
     Ok(PreparedTransfer {
         transaction,
+        accounts,
+        imported,
+        export_path: None,
         wallet: wallet.clone(),
         profile: profile.clone(),
         genesis,
-        recipient: recipient.to_string(),
-        lamports,
+        recipient: String::new(),
+        lamports: 0,
         fee,
         logs: simulation.logs.unwrap_or_default(),
         units: simulation.units_consumed,
         simulation_error: simulation.err.map(|e| format!("{e:?}")),
-        last_valid_block_height,
+        last_valid_block_height: u64::MAX,
     })
+}
+
+async fn validate_review(prepared: &PreparedTransfer) -> Result<()> {
+    if prepared.simulation_error.is_some() {
+        bail!("Simulation failed; this transaction cannot be signed");
+    }
+    let rpc = client(&prepared.profile);
+    if verify_development_network(&rpc).await? != prepared.genesis {
+        bail!("RPC network changed. Review the transaction again.");
+    }
+    if prepared.imported {
+        if !rpc
+            .is_blockhash_valid(
+                prepared.transaction.message.recent_blockhash(),
+                rpc.commitment(),
+            )
+            .await?
+        {
+            bail!("Imported review expired; rebuild and review the transaction again");
+        }
+    } else if rpc.get_block_height().await? > prepared.last_valid_block_height {
+        bail!("Review expired. Prepare the transfer again for a fresh blockhash.");
+    }
+    if crate::transaction::resolve_accounts(&rpc, &prepared.transaction).await? != prepared.accounts
+    {
+        bail!("Lookup-table resolution changed. Review the transaction again.");
+    }
+    Ok(())
+}
+
+pub async fn sign_export(
+    mut prepared: PreparedTransfer,
+    session: u64,
+    sender: mpsc::Sender<OperationEvent>,
+) {
+    let profile = prepared.profile.clone();
+    let result = async {
+        validate_review(&prepared).await?;
+        crate::transaction::sign(&mut prepared.transaction, &prepared.wallet)?;
+        let path = prepared
+            .export_path
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("No export path"))?;
+        let display = path.display().to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::transaction::export(&prepared.transaction, &path)
+        })
+        .await??;
+        Ok::<_, anyhow::Error>(display)
+    }
+    .await;
+    let update = match result {
+        Ok(path) => OperationUpdate::Exported(path),
+        Err(error) => OperationUpdate::Failed(crate::network::safe_error(error, &profile)),
+    };
+    let _ = sender.send(OperationEvent { session, update }).await;
 }
 
 pub async fn submit(
@@ -105,22 +268,13 @@ pub async fn submit(
     let profile = prepared.profile.clone();
     let scope = storage::scope(&profile.http, &prepared.wallet.address);
     let result = async {
-        if prepared.simulation_error.is_some() {
-            bail!("Simulation failed; this transfer cannot be submitted");
+        validate_review(&prepared).await?;
+        crate::transaction::sign(&mut prepared.transaction, &prepared.wallet)?;
+        if prepared.transaction.signatures.iter().any(|s| *s == Signature::default()) {
+            bail!("Additional signatures are required. Import again with an export path to save a partially signed transaction.");
         }
+        prepared.transaction.verify_and_hash_message().map_err(|_| anyhow::anyhow!("Signature verification failed"))?;
         let rpc = client(&profile);
-        if verify_development_network(&rpc).await? != prepared.genesis {
-            bail!("RPC network changed. Review the transfer again.");
-        }
-        if rpc.get_block_height().await? > prepared.last_valid_block_height {
-            bail!("Review expired. Prepare the transfer again for a fresh blockhash.");
-        }
-        {
-            let signer = prepared.wallet.signer()?;
-            prepared
-                .transaction
-                .try_sign(&[&signer], prepared.transaction.message.recent_blockhash)?;
-        }
         let signature = prepared.transaction.signatures[0];
         persist(
             &store,

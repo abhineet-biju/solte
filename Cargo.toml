@@ -7,6 +7,11 @@ description = "A project-aware Solana development wallet for the terminal"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
+wincode = "0.6"
+solana-message = { version = "4.6", features = ["wincode"] }
+solana-hash = "4.6"
+solana-address-lookup-table-interface = { version = "3.2", features = ["wincode", "bytemuck"] }
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream", "osc52"] }
 directories = "6"
@@ -26,7 +31,7 @@ solana-rpc-client-api = "=4.3.0"
 solana-signature = "3.5.2"
 solana-signer = "3.0.1"
 solana-system-interface = { version = "3.3", features = ["bincode"] }
-solana-transaction = { version = "4.2", features = ["wincode"] }
+solana-transaction = { version = "4.3", features = ["wincode", "verify"] }
 solana-transaction-status-client-types = { version = "=4.3.0", features = ["agave-unstable-api"] }
 tachyonfx = { version = "0.25.2", default-features = false, features = ["std", "sendable"] }
 tempfile = "3"
