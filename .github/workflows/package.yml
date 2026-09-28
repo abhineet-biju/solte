@@ -90,7 +90,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: dist-${{ matrix.target }}
+          shared-key: dist-${{ matrix.runner }}-${{ matrix.target }}
       - name: Install native build tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config binutils xz-utils
