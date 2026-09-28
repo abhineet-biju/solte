@@ -95,6 +95,13 @@ def main():
             wait_for(seller.exists)
             drain(0.5)
             send(b"t")
+            assert b"Choose theme" in output
+            send(b"j\x1b")
+            assert "glacier" not in (root / ".solte/config.toml").read_text()
+            send(b"tj\r")
+            send(b"m")
+            assert b"Choose motion" in output
+            send(b"k\r")
             if args.local_rpc:
                 recipient = address(seller)
                 payer = address(buyer)
@@ -135,6 +142,7 @@ def main():
             assert process.returncode == 0
             assert b"panicked" not in output
             assert "glacier" in (root / ".solte/config.toml").read_text()
+            assert "reduced_motion = false" in (root / ".solte/config.toml").read_text()
             print("PASS: keyboard and mouse creation, settings persistence, and clean exit")
             if args.local_rpc:
                 print("PASS: TUI funding, simulation review, transfer, and mouse transaction inspection")

@@ -63,7 +63,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Open transaction explorer / copy wallet address | o / y |
 | Follow logs / clear visible logs | F / C |
 | Cycle activity tabs | v |
-| Cycle theme / reduced motion | t / m |
+| Choose theme / motion | t / m |
 | Expand focused panel | z, or the panel's + button |
 | Help / close dialog / quit | ? / Escape / q |
 

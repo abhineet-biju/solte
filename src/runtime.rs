@@ -17,7 +17,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
     amount::parse_sol,
-    app::{Action, App, FormKind, Modal, Pane},
+    app::{Action, App, Appearance, FormKind, Modal, Pane},
     config::{RpcProfile, WalletRef, expand_path},
     funding::{self, Faucet},
     network::{self, Command, Monitor, Update},
@@ -296,6 +296,11 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             _ => Action::RpcAirdrop,
         };
     }
+    if action == Action::Submit
+        && let Some(Modal::Appearance { kind, selected }) = &app.modal
+    {
+        action = Action::SelectAppearance(*kind, *selected);
+    }
     if app.navigate(&action) {
         return Ok(false);
     }
@@ -391,18 +396,26 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 }
             }
         }
-        Action::Theme => {
-            app.config.theme = match app.config.theme.as_str() {
-                "ember" => "glacier",
-                "glacier" => "orchid",
-                _ => "ember",
-            }
-            .into();
-            services.save(app).await;
+        Action::Theme | Action::Motion => {
+            let kind = if action == Action::Theme {
+                Appearance::Theme
+            } else {
+                Appearance::Motion
+            };
+            app.modal = Some(Modal::Appearance {
+                kind,
+                selected: kind.current(&app.config),
+            });
         }
-        Action::Motion => {
-            app.config.reduced_motion = !app.config.reduced_motion;
-            services.save(app).await;
+        Action::SelectAppearance(kind, index) => {
+            if let Some((id, _)) = kind.choices().get(index) {
+                match kind {
+                    Appearance::Theme => app.config.theme = (*id).into(),
+                    Appearance::Motion => app.config.reduced_motion = index == 1,
+                }
+                app.modal = None;
+                services.save(app).await;
+            }
         }
         Action::Refresh => services.command(Command::Refresh),
         Action::Older => services.command(Command::Older),

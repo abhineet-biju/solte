@@ -21,7 +21,7 @@ use tachyonfx::{Effect, fx};
 
 use crate::{
     amount::format_sol,
-    app::{Action, App, Modal, Pane, Tab},
+    app::{Action, App, Appearance, Modal, Pane, Tab},
     model::{clean_text, now, short},
 };
 use theme::Theme;
@@ -134,6 +134,9 @@ impl Ui {
 
     pub fn draw(&mut self, frame: &mut Frame, app: &App) {
         self.hits.clear();
+        if app.config.reduced_motion {
+            self.effect = None;
+        }
         let theme = Theme::named(&app.config.theme);
         let area = frame.area();
         if self.last_area != area {
@@ -933,7 +936,7 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(area.x, area.bottom() - 2, 17, 1),
-                "Change theme t",
+                "Choose theme t",
                 Action::Theme,
                 theme,
                 false,
@@ -942,7 +945,7 @@ impl Ui {
                 self.button(
                     frame,
                     Rect::new(area.x + 19, area.bottom() - 2, 17, 1),
-                    "Toggle motion m",
+                    "Choose motion m",
                     Action::Motion,
                     theme,
                     false,
@@ -1007,6 +1010,7 @@ impl Ui {
         let screen = frame.area();
         let modal = app.modal.as_ref().unwrap();
         let height = match modal {
+            Modal::Appearance { .. } => 10,
             Modal::Funding { .. } => 15,
             Modal::Form(form) => (form.fields.len() * 3 + 10) as u16,
             Modal::Profiles { .. } => (app.config.profiles.len() * 2 + 7) as u16,
@@ -1023,6 +1027,14 @@ impl Ui {
         self.effect_area = area;
         frame.render_widget(Clear, area);
         let title = match modal {
+            Modal::Appearance {
+                kind: Appearance::Theme,
+                ..
+            } => "Choose theme",
+            Modal::Appearance {
+                kind: Appearance::Motion,
+                ..
+            } => "Choose motion",
             Modal::Funding { .. } => "Fund Devnet wallet",
             Modal::Form(form) => form.title(),
             Modal::Profiles { .. } => "RPC profiles",
@@ -1046,6 +1058,35 @@ impl Ui {
         frame.render_widget(block, area);
         self.target(Rect::new(area.right() - 8, area.y, 7, 1), Action::Close);
         match modal {
+            Modal::Appearance { kind, selected } => {
+                for (index, (id, label)) in kind.choices().iter().enumerate() {
+                    let palette = if *kind == Appearance::Theme {
+                        Theme::named(id)
+                    } else {
+                        theme
+                    };
+                    self.button(
+                        frame,
+                        Rect::new(inner.x, inner.y + index as u16, inner.width, 1),
+                        &format!(
+                            "{} {}{}",
+                            if index == *selected { "›" } else { " " },
+                            label,
+                            if index == kind.current(&app.config) {
+                                "  (current)"
+                            } else {
+                                ""
+                            }
+                        ),
+                        Action::SelectAppearance(*kind, index),
+                        palette,
+                        index == *selected,
+                    );
+                }
+                frame.render_widget(Paragraph::new("↑/↓ or j/k to choose · Enter to apply\nClick an option to apply · Esc to cancel")
+                    .style(Style::default().fg(theme.muted)),
+                    Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 2));
+            }
             Modal::Funding { selected, reason } => {
                 if let Some(wallet) = app.wallet() {
                     frame.render_widget(
@@ -1344,7 +1385,7 @@ impl Ui {
                     "F  Follow logs        C  Clear visible session log",
                     "",
                     "APPEARANCE",
-                    "t  Cycle theme        m  Toggle reduced motion",
+                    "t  Choose theme       m  Choose motion",
                     "",
                     "MOUSE",
                     "Click panel headings to focus, wallets to select, and",
@@ -1538,6 +1579,36 @@ mod tests {
         assert!(!ui.hits.iter().any(|h| matches!(h.action, Action::Focus(_))));
         assert!(ui.hits.iter().any(|h| h.action == Action::Submit));
         assert!(ui.hits.iter().any(|h| h.action == Action::Field(0)));
+    }
+
+    #[test]
+    fn appearance_choices_fit_small_dialogs_and_do_not_apply_on_navigation() {
+        for (width, height) in [(60, 10), (100, 20), (160, 48)] {
+            for kind in [Appearance::Theme, Appearance::Motion] {
+                let mut app = App::new("/test".into(), Config::default(), vec![]);
+                app.modal = Some(Modal::Appearance { kind, selected: 0 });
+                app.navigate(&Action::Scroll(1));
+                assert_eq!(kind.current(&app.config), 0);
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                for index in 0..kind.choices().len() {
+                    let action = Action::SelectAppearance(kind, index);
+                    let hit = ui.hits.iter().find(|hit| hit.action == action).unwrap();
+                    assert_eq!(ui.hit(hit.area.x, hit.area.y), Some(action));
+                    assert!(hit.area.right() <= width && hit.area.bottom() <= height);
+                }
+                assert!(
+                    ui.hits.iter().all(|hit| matches!(
+                        hit.action,
+                        Action::Close | Action::SelectAppearance(..)
+                    ))
+                );
+                app.navigate(&Action::Close);
+                assert!(app.modal.is_none());
+                assert_eq!(kind.current(&app.config), 0);
+            }
+        }
     }
 
     #[test]

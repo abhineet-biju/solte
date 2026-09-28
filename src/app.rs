@@ -78,6 +78,7 @@ pub enum Action {
     SelectProfile(usize),
     Theme,
     Motion,
+    SelectAppearance(Appearance, usize),
     Refresh,
     Older,
     Inspect,
@@ -236,7 +237,44 @@ impl Form {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appearance {
+    Theme,
+    Motion,
+}
+
+impl Appearance {
+    pub fn choices(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::Theme => &[
+                ("ember", "Ember · warm gold"),
+                ("glacier", "Glacier · cool blue"),
+                ("orchid", "Orchid · soft violet"),
+            ],
+            Self::Motion => &[
+                ("animated", "Subtle animations"),
+                ("reduced", "Reduced motion"),
+            ],
+        }
+    }
+
+    pub fn current(self, config: &Config) -> usize {
+        match self {
+            Self::Theme => self
+                .choices()
+                .iter()
+                .position(|(id, _)| *id == config.theme)
+                .unwrap_or(0),
+            Self::Motion => usize::from(config.reduced_motion),
+        }
+    }
+}
+
 pub enum Modal {
+    Appearance {
+        kind: Appearance,
+        selected: usize,
+    },
     Funding {
         selected: usize,
         reason: Option<String>,
@@ -403,8 +441,14 @@ impl App {
                 KeyCode::Char('y') if matches!(modal, Modal::Funding { .. }) => {
                     Some(Action::CopyAddress)
                 }
-                KeyCode::Tab if matches!(modal, Modal::Funding { .. }) => Some(Action::Scroll(1)),
-                KeyCode::BackTab if matches!(modal, Modal::Funding { .. }) => {
+                KeyCode::Tab
+                    if matches!(modal, Modal::Funding { .. } | Modal::Appearance { .. }) =>
+                {
+                    Some(Action::Scroll(1))
+                }
+                KeyCode::BackTab
+                    if matches!(modal, Modal::Funding { .. } | Modal::Appearance { .. }) =>
+                {
                     Some(Action::Scroll(-1))
                 }
                 KeyCode::Char('1') if matches!(modal, Modal::Funding { .. }) => {
@@ -525,6 +569,9 @@ impl App {
                 }
             },
             Action::Scroll(delta) => match &mut self.modal {
+                Some(Modal::Appearance { kind, selected }) => {
+                    *selected = move_index(*selected, delta, kind.choices().len());
+                }
                 Some(Modal::Funding { selected, .. }) => {
                     *selected = move_index(*selected, delta, 3)
                 }
