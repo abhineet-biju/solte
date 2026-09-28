@@ -2,6 +2,7 @@ pub mod amount;
 pub mod app;
 pub mod config;
 pub mod demo;
+pub mod funding;
 pub mod model;
 pub mod network;
 pub mod operations;

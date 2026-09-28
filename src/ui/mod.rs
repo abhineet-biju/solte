@@ -1007,6 +1007,7 @@ impl Ui {
         let screen = frame.area();
         let modal = app.modal.as_ref().unwrap();
         let height = match modal {
+            Modal::Funding { .. } => 15,
             Modal::Form(form) => (form.fields.len() * 3 + 10) as u16,
             Modal::Profiles { .. } => (app.config.profiles.len() * 2 + 7) as u16,
             _ => screen
@@ -1022,6 +1023,7 @@ impl Ui {
         self.effect_area = area;
         frame.render_widget(Clear, area);
         let title = match modal {
+            Modal::Funding { .. } => "Fund Devnet wallet",
             Modal::Form(form) => form.title(),
             Modal::Profiles { .. } => "RPC profiles",
             Modal::Inspect { .. } => "Transaction inspector",
@@ -1044,6 +1046,59 @@ impl Ui {
         frame.render_widget(block, area);
         self.target(Rect::new(area.right() - 8, area.y, 7, 1), Action::Close);
         match modal {
+            Modal::Funding { selected, reason } => {
+                if let Some(wallet) = app.wallet() {
+                    frame.render_widget(
+                        Paragraph::new(format!("{}  [copy]", wallet.address))
+                            .style(Style::default().fg(theme.muted)),
+                        Rect::new(inner.x, inner.y, inner.width, 1),
+                    );
+                    self.target(
+                        Rect::new(inner.x, inner.y, inner.width, 1),
+                        Action::CopyAddress,
+                    );
+                }
+                for (index, (label, action)) in [
+                    (
+                        "1  Solana faucet · address prefilled",
+                        Action::BrowserFaucet(crate::funding::Faucet::Solana),
+                    ),
+                    (
+                        "2  Quicknode faucet · copy address",
+                        Action::BrowserFaucet(crate::funding::Faucet::Quicknode),
+                    ),
+                    ("3  Request through current RPC", Action::RpcAirdrop),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    self.button(
+                        frame,
+                        Rect::new(inner.x, inner.y + 1 + index as u16, inner.width, 1),
+                        label,
+                        action,
+                        theme,
+                        *selected == index,
+                    );
+                }
+                let message = reason.as_ref().map(|reason| format!("RPC request failed: {}\nUse a web faucet, or check your balance before retrying an uncertain request.", clean_text(reason)))
+                    .unwrap_or_else(|| "Web faucets have their own limits and verification. Finish the request in your browser; Solte watches for the funds.\n↑/↓ or j/k selects · Enter opens · Esc cancels".into());
+                frame.render_widget(
+                    Paragraph::new(message)
+                        .wrap(Wrap { trim: false })
+                        .style(Style::default().fg(if reason.is_some() {
+                            theme.accent
+                        } else {
+                            theme.muted
+                        })),
+                    Rect::new(
+                        inner.x,
+                        inner.y + 4,
+                        inner.width,
+                        inner.height.saturating_sub(4),
+                    ),
+                );
+            }
             Modal::Form(form) if screen.height < 20 => self.short_form(frame, form, inner, theme),
             Modal::Form(form) => {
                 let capacity = (inner.height.saturating_sub(8) / 3).max(1) as usize;
@@ -1579,6 +1634,40 @@ mod tests {
             for action in [Action::New, Action::Import, Action::Help, Action::Quit] {
                 assert!(ui.hits.iter().any(|hit| hit.action == action));
             }
+        }
+    }
+
+    #[test]
+    fn faucet_choices_remain_clickable_inside_small_dialogs() {
+        for (width, height) in [(60, 10), (120, 14), (160, 48)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            crate::demo::populate(&mut app);
+            app.modal = Some(Modal::Funding {
+                selected: 0,
+                reason: Some("Provider rejected the request".into()),
+            });
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut ui = Ui::default();
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            for action in [
+                Action::BrowserFaucet(crate::funding::Faucet::Solana),
+                Action::BrowserFaucet(crate::funding::Faucet::Quicknode),
+                Action::RpcAirdrop,
+                Action::CopyAddress,
+                Action::Close,
+            ] {
+                assert!(ui.hits.iter().any(|hit| hit.action == action));
+            }
+            assert!(
+                ui.hits
+                    .iter()
+                    .all(|hit| hit.area.right() <= width && hit.area.bottom() <= height)
+            );
+            assert!(
+                !ui.hits
+                    .iter()
+                    .any(|hit| matches!(hit.action, Action::Selector(_) | Action::Focus(_)))
+            );
         }
     }
 

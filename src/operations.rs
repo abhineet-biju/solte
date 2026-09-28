@@ -36,6 +36,7 @@ pub enum OperationUpdate {
     Submitted(String),
     Finished(String),
     Failed(String),
+    FundingFailed(String),
 }
 
 pub struct OperationEvent {
@@ -167,14 +168,18 @@ pub async fn fund(
     sender: mpsc::Sender<OperationEvent>,
 ) {
     let scope = storage::scope(&profile.http, &wallet.address);
+    let mut devnet = false;
+    let mut submitted = false;
     let result = async {
         if lamports == 0 {
             bail!("Amount must be greater than zero");
         }
         let rpc = client(&profile);
-        verify_development_network(&rpc).await?;
+        devnet = verify_development_network(&rpc).await? == crate::network::DEVNET_GENESIS;
         let address = Pubkey::from_str(&wallet.address)?;
-        let signature = rpc.request_airdrop(&address, lamports).await?;
+        let signature = tokio::time::timeout(Duration::from_secs(15), rpc.request_airdrop(&address, lamports)).await
+            .map_err(|_| anyhow::anyhow!("Airdrop request timed out. It may still land; check the balance before requesting again."))??;
+        submitted = true;
         persist(
             &store,
             &scope,
@@ -192,6 +197,20 @@ pub async fn fund(
         Ok::<_, anyhow::Error>(signature)
     }
     .await;
+    if let Err(error) = &result
+        && devnet
+        && !submitted
+    {
+        let message = safe_error(error, &profile);
+        persist(&store, &scope, "ERROR", message.clone()).await;
+        let _ = sender
+            .send(OperationEvent {
+                session,
+                update: OperationUpdate::FundingFailed(message),
+            })
+            .await;
+        return;
+    }
     finish(result, session, &store, &scope, &profile, &sender).await;
 }
 

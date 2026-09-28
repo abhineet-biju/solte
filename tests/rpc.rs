@@ -73,9 +73,12 @@ async fn server(genesis: &'static str) -> MockRpc {
                         json!({"context":{"slot":1},"value":{"err":null,"logs":["Program success"],"accounts":null,"unitsConsumed":150}})
                     }
                     "getFeeForMessage" => json!({"context":{"slot":1},"value":5000}),
+                    "requestAirdrop" => Value::Null,
                     method => panic!("Unexpected RPC method: {method}"),
                 };
-                let body = json!({"jsonrpc":"2.0","id":request["id"],"result":value}).to_string();
+                let body = if request["method"] == "requestAirdrop" {
+                    json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32603,"message":"Faucet rate limit reached"}})
+                } else { json!({"jsonrpc":"2.0","id":request["id"],"result":value}) }.to_string();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -132,4 +135,40 @@ async fn simulation_does_not_release_a_signed_transaction() {
             .any(|r| r["method"] == "simulateTransaction" && r["params"][1]["sigVerify"] == false)
     );
     assert!(!requests.iter().any(|r| r["method"] == "sendTransaction"));
+}
+
+#[tokio::test]
+async fn rejected_devnet_airdrop_offers_web_recovery_without_reporting_submission() {
+    let mock = server(solte::network::DEVNET_GENESIS).await;
+    let temp = tempfile::tempdir().unwrap();
+    let wallet = wallet::create(temp.path(), "payer").unwrap();
+    let store = solte::storage::Store::open(temp.path()).unwrap();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+    operations::fund(
+        mock.profile.clone(),
+        wallet,
+        1_000_000_000,
+        7,
+        store,
+        sender,
+    )
+    .await;
+    let event = receiver.recv().await.unwrap();
+    assert_eq!(event.session, 7);
+    match event.update {
+        operations::OperationUpdate::FundingFailed(message) => {
+            assert!(message.contains("rate limit"))
+        }
+        _ => panic!("Rejected airdrop should offer faucet recovery"),
+    }
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(
+        mock.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r["method"] == "requestAirdrop")
+            .count(),
+        1
+    );
 }

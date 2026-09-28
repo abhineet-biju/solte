@@ -56,6 +56,8 @@ pub enum FormKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    BrowserFaucet(crate::funding::Faucet),
+    RpcAirdrop,
     ForceQuit,
     Quit,
     Focus(Pane),
@@ -235,6 +237,10 @@ impl Form {
 }
 
 pub enum Modal {
+    Funding {
+        selected: usize,
+        reason: Option<String>,
+    },
     Form(Form),
     Profiles {
         selected: usize,
@@ -394,10 +400,26 @@ impl App {
                 return form.key(key);
             }
             return match key.code {
+                KeyCode::Char('y') if matches!(modal, Modal::Funding { .. }) => {
+                    Some(Action::CopyAddress)
+                }
+                KeyCode::Tab if matches!(modal, Modal::Funding { .. }) => Some(Action::Scroll(1)),
+                KeyCode::BackTab if matches!(modal, Modal::Funding { .. }) => {
+                    Some(Action::Scroll(-1))
+                }
+                KeyCode::Char('1') if matches!(modal, Modal::Funding { .. }) => {
+                    Some(Action::BrowserFaucet(crate::funding::Faucet::Solana))
+                }
+                KeyCode::Char('2') if matches!(modal, Modal::Funding { .. }) => {
+                    Some(Action::BrowserFaucet(crate::funding::Faucet::Quicknode))
+                }
+                KeyCode::Char('3') if matches!(modal, Modal::Funding { .. }) => {
+                    Some(Action::RpcAirdrop)
+                }
                 KeyCode::Esc | KeyCode::Char('q') => Some(Action::Close),
                 KeyCode::Enter => Some(Action::Submit),
-                KeyCode::Char('j') | KeyCode::Down => Some(Action::Scroll(1)),
-                KeyCode::Char('k') | KeyCode::Up => Some(Action::Scroll(-1)),
+                KeyCode::Char('j' | 'J') | KeyCode::Down => Some(Action::Scroll(1)),
+                KeyCode::Char('k' | 'K') | KeyCode::Up => Some(Action::Scroll(-1)),
                 KeyCode::PageDown => Some(Action::Scroll(10)),
                 KeyCode::PageUp => Some(Action::Scroll(-10)),
                 KeyCode::Char('a') if matches!(modal, Modal::Profiles { .. }) => {
@@ -503,6 +525,9 @@ impl App {
                 }
             },
             Action::Scroll(delta) => match &mut self.modal {
+                Some(Modal::Funding { selected, .. }) => {
+                    *selected = move_index(*selected, delta, 3)
+                }
                 Some(Modal::Form(form)) => {
                     form.active = move_index(form.active, delta, form.fields.len());
                 }

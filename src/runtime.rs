@@ -19,6 +19,7 @@ use crate::{
     amount::parse_sol,
     app::{Action, App, FormKind, Modal, Pane},
     config::{RpcProfile, WalletRef, expand_path},
+    funding::{self, Faucet},
     network::{self, Command, Monitor, Update},
     operations::{self, OperationEvent, OperationUpdate},
     storage::Store,
@@ -91,7 +92,12 @@ impl Services {
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+        let _ = execute!(
+            io::stdout(),
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            crossterm::event::DisableFocusChange
+        );
         ratatui::restore();
     }
 }
@@ -135,7 +141,12 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
     };
     let mut terminal = ratatui::init();
     let _guard = TerminalGuard;
-    execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
+    execute!(
+        io::stdout(),
+        EnableMouseCapture,
+        EnableBracketedPaste,
+        crossterm::event::EnableFocusChange
+    )?;
     let mut events = EventStream::new();
     let mut ui = Ui::default();
     if !app.demo {
@@ -163,6 +174,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     },
                     Event::Paste(text) => { app.paste(&text); None },
                     Event::Resize(width, height) => { terminal.resize(ratatui::layout::Rect::new(0, 0, width, height))?; None },
+                    Event::FocusGained => { services.command(Command::Refresh); None },
                     _ => { redraw = false; None },
                 };
                 let action = match action {
@@ -200,6 +212,12 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     OperationUpdate::Submitted(signature) => { app.last_signature = Some(signature.clone()); app.busy = Some("Waiting for transaction confirmation…".into()); app.log("INFO", format!("Submitted {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Finished(signature) => { app.busy = None; app.status = "Transaction confirmed · press o to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Failed(message) => { app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
+                    OperationUpdate::FundingFailed(message) => {
+                        app.busy = None;
+                        report_error(&mut app, message.clone());
+                        app.modal = Some(Modal::Funding { selected: 0, reason: Some(message) });
+                        services.command(Command::Refresh);
+                    },
                 }
             },
             Some(event) = local_receiver.recv() => match event {
@@ -269,6 +287,15 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             Pane::Logs => Action::Follow,
         };
     }
+    if action == Action::Submit
+        && let Some(Modal::Funding { selected, .. }) = &app.modal
+    {
+        action = match selected {
+            0 => Action::BrowserFaucet(Faucet::Solana),
+            1 => Action::BrowserFaucet(Faucet::Quicknode),
+            _ => Action::RpcAirdrop,
+        };
+    }
     if app.navigate(&action) {
         return Ok(false);
     }
@@ -281,6 +308,8 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 | Action::New
                 | Action::Import
                 | Action::Fund
+                | Action::RpcAirdrop
+                | Action::BrowserFaucet(_)
                 | Action::Send
                 | Action::Submit
         )
@@ -295,12 +324,29 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             if wallet.program && action == Action::Send {
                 bail!("Program identities are read-only");
             }
-            app.open_form(if action == Action::Fund {
-                FormKind::Fund
+            if action == Action::Fund
+                && funding::is_devnet(
+                    app.profile(),
+                    app.network.as_ref().map(|n| n.genesis.as_str()),
+                )
+            {
+                app.modal = Some(Modal::Funding {
+                    selected: 0,
+                    reason: None,
+                });
             } else {
-                FormKind::Transfer
-            });
+                app.open_form(if action == Action::Fund {
+                    FormKind::Fund
+                } else {
+                    FormKind::Transfer
+                });
+            }
         }
+        Action::RpcAirdrop => {
+            app.wallet().context("No wallet selected")?;
+            app.open_form(FormKind::Fund);
+        }
+        Action::BrowserFaucet(faucet) => open_faucet(app, services, faucet)?,
         Action::Profiles => {
             app.modal = Some(Modal::Profiles {
                 selected: app.config.selected_profile,
@@ -432,6 +478,41 @@ fn copy(value: String) -> Result<()> {
         io::stdout(),
         crossterm::clipboard::CopyToClipboard::to_clipboard_from(value)
     )?;
+    Ok(())
+}
+
+fn open_faucet(app: &mut App, services: &mut Services, faucet: Faucet) -> Result<()> {
+    if app.demo || services.offline {
+        bail!("Browser funding is disabled in demo/offline mode");
+    }
+    if app
+        .network
+        .as_ref()
+        .is_some_and(|n| n.genesis != network::DEVNET_GENESIS)
+        || (!funding::is_devnet(
+            app.profile(),
+            app.network.as_ref().map(|n| n.genesis.as_str()),
+        ) && !matches!(app.modal, Some(Modal::Funding { .. })))
+    {
+        bail!("These web faucets fund Devnet only; select a Devnet profile first");
+    }
+    let address = app.wallet().context("No wallet selected")?.address.clone();
+    let url = funding::faucet_url(faucet, &address)?;
+    if faucet == Faucet::Quicknode {
+        copy(address)?;
+    }
+    app.modal = None;
+    app.status =
+        "Opening faucet. Complete the request in your browser; Solte will refresh the balance."
+            .into();
+    let sender = services.local_sender.clone();
+    services.jobs.spawn(async move {
+        let result = tokio::task::spawn_blocking(move || open::that(url)).await.map_err(anyhow::Error::from).and_then(|result| result.map_err(anyhow::Error::from)).map(|_| match faucet {
+            Faucet::Solana => "Opened the Solana faucet with your address prefilled. Complete verification in the browser.".into(),
+            Faucet::Quicknode => "Opened Quicknode. Paste your address; clipboard support depends on your terminal.".into(),
+        });
+        let _ = sender.send(LocalEvent::Notice(result)).await;
+    });
     Ok(())
 }
 
