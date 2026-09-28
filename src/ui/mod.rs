@@ -1038,18 +1038,18 @@ impl Ui {
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(format!(" {title} "))
+            .title_top(
+                Line::from(Span::styled(
+                    " Esc × ",
+                    Style::default().fg(theme.muted).bg(theme.panel),
+                ))
+                .right_aligned(),
+            )
             .border_style(Style::default().fg(theme.accent))
             .style(Style::default().bg(theme.panel).fg(theme.text));
         let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
         frame.render_widget(block, area);
-        self.button(
-            frame,
-            Rect::new(area.right() - 8, area.y, 6, 1),
-            "Esc ×",
-            Action::Close,
-            theme,
-            false,
-        );
+        self.target(Rect::new(area.right() - 8, area.y, 7, 1), Action::Close);
         match modal {
             Modal::Form(form) if screen.height < 20 => self.short_form(frame, form, inner, theme),
             Modal::Form(form) => {
@@ -1486,6 +1486,34 @@ mod tests {
         assert!(!ui.hits.iter().any(|h| matches!(h.action, Action::Focus(_))));
         assert!(ui.hits.iter().any(|h| h.action == Action::Submit));
         assert!(ui.hits.iter().any(|h| h.action == Action::Field(0)));
+    }
+
+    #[test]
+    fn close_label_fits_inside_dialog_border_and_matches_its_click_target() {
+        for (width, height) in [(60, 10), (120, 14), (80, 24), (160, 48)] {
+            let mut app = App::new("/test/project".into(), Config::default(), vec![]);
+            app.open_form(crate::app::FormKind::Profile);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut ui = Ui::default();
+            terminal.draw(|f| ui.draw(f, &app)).unwrap();
+            let close = ui
+                .hits
+                .iter()
+                .find(|hit| hit.action == Action::Close)
+                .unwrap()
+                .area;
+            for (offset, character) in " Esc × ".chars().enumerate() {
+                assert_eq!(
+                    terminal.backend().buffer()[(close.x + offset as u16, close.y)].symbol(),
+                    character.to_string()
+                );
+            }
+            assert_eq!(
+                terminal.backend().buffer()[(close.right(), close.y)].symbol(),
+                "╮"
+            );
+            assert_eq!(ui.hit(close.x + 1, close.y), Some(Action::Close));
+        }
     }
 
     #[test]
