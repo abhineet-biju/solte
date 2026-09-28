@@ -18,6 +18,8 @@ struct Args {
     project: PathBuf,
     #[arg(long, value_enum, default_value_t = View::Overview)]
     view: View,
+    #[arg(long, value_parser = ["ember", "glacier", "orchid", "neon"], help = "Choose the startup theme")]
+    theme: Option<String>,
     #[arg(long, help = "Use a saved RPC profile by name")]
     profile: Option<String>,
     #[arg(long, help = "Show cached history without making network requests")]
@@ -57,6 +59,9 @@ async fn main() -> Result<()> {
             .iter()
             .position(|p| p.name.eq_ignore_ascii_case(name))
             .context("RPC profile not found")?;
+    }
+    if let Some(theme) = args.theme {
+        config.theme = theme;
     }
     if args.reduced_motion {
         config.reduced_motion = true;

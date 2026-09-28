@@ -72,6 +72,9 @@ impl Ui {
         }
     }
     pub fn sync_scroll(&self, app: &mut App) {
+        if self.last_area.width < 60 || self.last_area.height < 10 {
+            return;
+        }
         app.modal_scroll_limit = self.modal_scroll_limit;
         if let Some(
             Modal::Inspect { scroll, .. } | Modal::Review { scroll, .. } | Modal::Help { scroll },
@@ -1751,6 +1754,95 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn undersized_window_preserves_dialog_scroll_until_it_can_render_again() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        app.modal = Some(Modal::Help { scroll: 8 });
+        let mut ui = Ui::default();
+        for (width, height) in [(90, 22), (45, 8), (90, 22)] {
+            Terminal::new(TestBackend::new(width, height))
+                .unwrap()
+                .draw(|frame| ui.draw(frame, &app))
+                .unwrap();
+            ui.sync_scroll(&mut app);
+            assert!(matches!(app.modal, Some(Modal::Help { scroll: 8 })));
+        }
+    }
+
+    #[test]
+    fn resize_sweep_keeps_controls_in_bounds_and_disjoint() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.config.theme = "neon".into();
+        let mut ui = Ui::default();
+        for (width, height) in [
+            (160, 48),
+            (100, 24),
+            (99, 23),
+            (90, 22),
+            (80, 20),
+            (80, 10),
+            (79, 10),
+            (68, 12),
+            (67, 12),
+            (60, 10),
+            (45, 8),
+            (60, 10),
+            (90, 22),
+            (140, 42),
+        ] {
+            for view in View::ALL {
+                app.switch_view(view);
+                for modal in 0..7 {
+                    app.modal = match modal {
+                        0 => None,
+                        1 => Some(Modal::Appearance {
+                            kind: Appearance::Theme,
+                            selected: 3,
+                        }),
+                        2 => Some(Modal::Profiles { selected: 1 }),
+                        3 => Some(Modal::Funding {
+                            selected: 0,
+                            reason: None,
+                        }),
+                        4 => Some(Modal::Form(crate::app::Form::new(
+                            crate::app::FormKind::Profile,
+                            1,
+                        ))),
+                        5 => Some(Modal::Inspect {
+                            signature: app.records[0].signature.clone(),
+                            scroll: 100,
+                        }),
+                        _ => Some(Modal::Help { scroll: 100 }),
+                    };
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                    ui.sync_scroll(&mut app);
+                    let controls: Vec<_> = ui
+                        .hits
+                        .iter()
+                        .filter(|hit| !matches!(hit.action, Action::Focus(_)))
+                        .collect();
+                    for (index, hit) in controls.iter().enumerate() {
+                        assert!(
+                            hit.area.right() <= width && hit.area.bottom() <= height,
+                            "{view:?} {modal} {width}x{height} {:?}",
+                            hit.action
+                        );
+                        for other in controls.iter().skip(index + 1) {
+                            assert!(
+                                hit.area.intersection(other.area).is_empty(),
+                                "{view:?} {modal} {width}x{height}: {:?} overlaps {:?}",
+                                hit.action,
+                                other.action
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

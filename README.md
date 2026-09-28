@@ -134,3 +134,7 @@ Overview retains all four summaries from 80 columns by 20 rows, keeping Wallets 
 See [key-handling practices](docs/key-handling.md) for memory lifetime, file permissions, and the limits of development-key protection.
 
 Manual refresh displays a spinner while pending and a success check or failure indicator for four seconds after completion. Reduced motion keeps progress text static. Offline refresh reloads cached history; demo data does not issue RPC requests. Repeat refresh presses are coalesced while a request is pending.
+
+Appearance includes Ember, Glacier, Orchid, and Neon. Neon uses a navy background, cyan headings, magenta focus, and mint balances. Choose it with `t` or launch with `solte --theme neon`. Theme selection changes colors only.
+
+Terminal font zoom is handled as a change in available character columns and rows. Layouts reflow at their breakpoints, preserve view/selection state, and rebuild click targets. Below 60 × 10, Solte shows a size hint and recovers when enlarged; it cannot fit the complete interface below that minimum.

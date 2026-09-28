@@ -89,7 +89,7 @@ def main():
             assert len(json.loads(buyer.read_text())) == 64
             assert buyer.stat().st_mode & 0o777 == 0o600
 
-            send(b"\x1b[<0;4;29M")
+            send(b"\x1b[<0;4;28M")
             send(b"\x15seller\r")
             seller = root / ".solte/keys/seller.json"
             wait_for(seller.exists)
@@ -99,6 +99,7 @@ def main():
             send(b"j\x1b")
             assert "glacier" not in (root / ".solte/config.toml").read_text()
             send(b"tj\r")
+            send(b"tjj\r")
             send(b"m")
             assert b"Choose motion" in output
             send(b"k\r")
@@ -125,13 +126,13 @@ def main():
                 send(b"\x1b[B\r", 0.8)
                 assert "selected_profile = 1" in (root / ".solte/config.toml").read_text()
             send(b"p")
-            for columns, rows in [(88, 10), (60, 10), (160, 48), (140, 42)]:
+            for columns, rows in [(100, 24), (99, 23), (80, 10), (60, 10), (45, 8), (60, 10), (160, 48), (140, 42)]:
                 fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
                 process.send_signal(signal.SIGWINCH)
                 drain(0.3)
                 assert process.poll() is None, "Resizing a dialog stopped the application"
             send(b"\x1b")
-            for columns, rows in [(120, 14), (88, 10), (60, 10), (140, 42)]:
+            for columns, rows in [(120, 14), (90, 22), (80, 10), (79, 10), (60, 10), (45, 8), (140, 42)]:
                 fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
                 process.send_signal(signal.SIGWINCH)
                 drain(0.3)
@@ -141,7 +142,7 @@ def main():
             process.wait(timeout=5)
             assert process.returncode == 0
             assert b"panicked" not in output
-            assert "glacier" in (root / ".solte/config.toml").read_text()
+            assert 'theme = "neon"' in (root / ".solte/config.toml").read_text()
             assert "reduced_motion = false" in (root / ".solte/config.toml").read_text()
             print("PASS: keyboard and mouse creation, settings persistence, and clean exit")
             if args.local_rpc:
