@@ -2,5 +2,41 @@
 name = "solte"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.97.1"
+description = "A project-aware Solana development wallet for the terminal"
 
 [dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = { version = "0.29", features = ["event-stream", "osc52"] }
+directories = "6"
+futures-util = "0.3"
+open = "5"
+ratatui = "0.30.2"
+rusqlite = { version = "0.38", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+solana-commitment-config = "3.1.1"
+solana-keypair = "3.1.2"
+solana-pubkey = "4.3.0"
+solana-pubsub-client = { version = "=4.3.0", features = ["agave-unstable-api"] }
+solana-rpc-client = { version = "=4.3.0", default-features = false, features = ["agave-unstable-api"] }
+solana-rpc-client-api = "=4.3.0"
+solana-signature = "3.5.2"
+solana-signer = "3.0.1"
+solana-system-interface = { version = "3.3", features = ["bincode"] }
+solana-transaction = { version = "4.2", features = ["wincode"] }
+solana-transaction-status-client-types = { version = "=4.3.0", features = ["agave-unstable-api"] }
+tachyonfx = { version = "0.25.2", default-features = false, features = ["std", "sendable"] }
+thiserror = "2"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
+toml = "1"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[profile.release]
+lto = "thin"
+strip = true
