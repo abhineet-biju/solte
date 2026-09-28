@@ -312,6 +312,8 @@ pub struct App {
     pub filter: String,
     pub failures_only: bool,
     pub history_loading: bool,
+    pub offline: bool,
+    pub modal_scroll_limit: u16,
     pub logs: VecDeque<LogEntry>,
     pub log_scroll: usize,
     pub follow: bool,
@@ -352,6 +354,8 @@ impl App {
             filter: String::new(),
             failures_only: false,
             history_loading: false,
+            offline: false,
+            modal_scroll_limit: 0,
             logs: VecDeque::new(),
             log_scroll: 0,
             follow: true,
@@ -368,6 +372,18 @@ impl App {
             session: 0,
             zoomed: false,
             demo: false,
+        }
+    }
+
+    pub fn log_transport(&self) -> &'static str {
+        if self.offline {
+            "Offline"
+        } else if !self.connected {
+            "Waiting"
+        } else if self.subscribed {
+            "Live"
+        } else {
+            "Polling"
         }
     }
 
@@ -467,6 +483,8 @@ impl App {
                 KeyCode::Enter => Some(Action::Submit),
                 KeyCode::Char('j' | 'J') | KeyCode::Down => Some(Action::Scroll(1)),
                 KeyCode::Char('k' | 'K') | KeyCode::Up => Some(Action::Scroll(-1)),
+                KeyCode::Home => Some(Action::Scroll(-65535)),
+                KeyCode::End => Some(Action::Scroll(65535)),
                 KeyCode::PageDown => Some(Action::Scroll(10)),
                 KeyCode::PageUp => Some(Action::Scroll(-10)),
                 KeyCode::Char('a') if matches!(modal, Modal::Profiles { .. }) => {
@@ -589,7 +607,10 @@ impl App {
                     Modal::Inspect { scroll, .. }
                     | Modal::Review { scroll, .. }
                     | Modal::Help { scroll },
-                ) => *scroll = (*scroll as i32 + delta).clamp(0, u16::MAX as i32) as u16,
+                ) => {
+                    *scroll =
+                        (*scroll as i32 + delta).clamp(0, i32::from(self.modal_scroll_limit)) as u16
+                }
                 _ => return self.navigate(&Action::Move(delta)),
             },
             Action::Field(index) => {

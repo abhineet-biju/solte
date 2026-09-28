@@ -163,10 +163,7 @@ impl Ui {
             ("Slot", number(state.map(|n| n.slot))),
             ("Block", number(state.map(|n| n.block_height))),
             ("Epoch", number(state.map(|n| n.epoch))),
-            (
-                "Logs",
-                if app.subscribed { "Live" } else { "Polling" }.into(),
-            ),
+            ("Logs", app.log_transport().into()),
             ("Tokens", number(state.map(|n| n.token_accounts as u64))),
             (
                 "Version",

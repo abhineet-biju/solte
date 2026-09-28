@@ -104,6 +104,7 @@ impl Drop for TerminalGuard {
 }
 
 pub async fn run(mut app: App, offline: bool) -> Result<()> {
+    app.offline = offline;
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         bail!(
             "Solte needs an interactive terminal. Use --check for an RPC diagnostic or --snapshot for a render."
@@ -158,6 +159,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
     animation_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut status_tick = tokio::time::interval(Duration::from_secs(1));
     terminal.draw(|frame| ui.draw(frame, &app))?;
+    ui.sync_scroll(&mut app);
     loop {
         let mut redraw = true;
         tokio::select! {
@@ -259,6 +261,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
         }
         if redraw {
             terminal.draw(|frame| ui.draw(frame, &app))?;
+            ui.sync_scroll(&mut app);
         }
     }
     services.monitor = None;
@@ -336,6 +339,9 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         Action::New => app.open_form(FormKind::New),
         Action::Import => app.open_form(FormKind::Import),
         Action::Fund | Action::Send => {
+            if services.offline {
+                bail!("Unavailable offline. Restart Solte without --offline to fund or send SOL.");
+            }
             let wallet = app.wallet().context("Create or import a wallet first")?;
             if wallet.program && action == Action::Send {
                 bail!("Program identities are read-only");

@@ -33,6 +33,7 @@ pub struct Hit {
 
 pub struct Ui {
     pub hits: Vec<Hit>,
+    pub modal_scroll_limit: u16,
     wallets: ListState,
     transactions: TableState,
     effect: Option<Effect>,
@@ -45,6 +46,7 @@ impl Default for Ui {
     fn default() -> Self {
         Self {
             hits: vec![],
+            modal_scroll_limit: 0,
             wallets: ListState::default(),
             transactions: TableState::default(),
             effect: None,
@@ -69,6 +71,16 @@ impl Ui {
             self.last_frame = Instant::now();
         }
     }
+    pub fn sync_scroll(&self, app: &mut App) {
+        app.modal_scroll_limit = self.modal_scroll_limit;
+        if let Some(
+            Modal::Inspect { scroll, .. } | Modal::Review { scroll, .. } | Modal::Help { scroll },
+        ) = &mut app.modal
+        {
+            *scroll = (*scroll).min(self.modal_scroll_limit);
+        }
+    }
+
     pub fn animating(&self) -> bool {
         self.effect.is_some()
     }
@@ -202,6 +214,7 @@ impl Ui {
 
     pub fn draw(&mut self, frame: &mut Frame, app: &App) {
         self.hits.clear();
+        self.modal_scroll_limit = 0;
         if app.config.reduced_motion {
             self.effect = None;
         }
@@ -833,7 +846,7 @@ impl Ui {
             )),
             text(
                 "Wallet logs",
-                if app.subscribed { "Live" } else { "Polling" }.into(),
+                app.log_transport().into(),
                 if app.subscribed {
                     theme.green
                 } else {
@@ -1350,7 +1363,7 @@ impl Ui {
                 );
             }
             Modal::Inspect { signature, scroll } => {
-                let lines = app
+                let mut lines = app
                     .records
                     .iter()
                     .find(|r| &r.signature == signature)
@@ -1358,6 +1371,9 @@ impl Ui {
                     .unwrap_or_else(|| {
                         vec!["Transaction is no longer in the current view.".into()]
                     });
+                if inner.height < 12 && lines.len() >= 2 && lines[0] == "Signature" {
+                    lines.splice(0..2, [format!("Signature  {} · copy y", short(signature))]);
+                }
                 self.inspection_body(frame, inner, lines, *scroll, theme);
                 self.button(
                     frame,
@@ -1490,16 +1506,23 @@ impl Ui {
                 Line::from(Span::styled(line, Style::default().fg(color)))
             })
             .collect();
+        let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(2));
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let total = paragraph.line_count(content.width);
+        self.modal_scroll_limit = total
+            .saturating_sub(content.height as usize)
+            .min(u16::MAX as usize) as u16;
+        let offset = scroll.min(self.modal_scroll_limit);
+        frame.render_widget(paragraph.scroll((offset, 0)), content);
         frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((scroll, 0)),
-            Rect::new(
-                area.x,
-                area.y + 1,
-                area.width,
-                area.height.saturating_sub(4),
-            ),
+            Paragraph::new(format!(
+                "{}–{} / {} · Home/End",
+                usize::from(offset) + 1,
+                (usize::from(offset) + content.height as usize).min(total),
+                total
+            ))
+            .style(Style::default().fg(theme.muted)),
+            Rect::new(area.x, area.bottom() - 2, area.width.saturating_sub(13), 1),
         );
         if area.width > 14 {
             self.button(
@@ -1605,6 +1628,43 @@ pub fn snapshot(app: &App, path: &Path, width: u16, height: u16) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn inspector_clamps_scroll_and_compact_search_remains_visible() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.modal = Some(Modal::Inspect {
+            signature: app.records[3].signature.clone(),
+            scroll: 0,
+        });
+        let mut ui = Ui::default();
+        let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        ui.sync_scroll(&mut app);
+        assert!(app.modal_scroll_limit > 0);
+        app.navigate(&Action::Scroll(65535));
+        app.navigate(&Action::Scroll(65535));
+        assert!(
+            matches!(app.modal, Some(Modal::Inspect { scroll, .. }) if scroll == app.modal_scroll_limit)
+        );
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        app.navigate(&Action::Scroll(-1));
+        assert!(
+            matches!(app.modal, Some(Modal::Inspect { scroll, .. }) if scroll + 1 == app.modal_scroll_limit)
+        );
+        app.navigate(&Action::Close);
+        app.filter = "missing-query".into();
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Filter: missing-query"));
+        assert!(ui.hits.iter().any(|hit| hit.action == Action::ClearFilter));
+    }
 
     #[test]
     fn first_run_controls_stay_inside_panels_and_keep_visible_text() {
