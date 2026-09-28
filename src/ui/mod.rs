@@ -106,6 +106,30 @@ impl Ui {
         frame.render_widget(Paragraph::new(format!(" {text} ")).style(style), area);
         self.target(area, action);
     }
+    fn shortcut_button(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        label: &str,
+        key: &str,
+        action: Action,
+        theme: Theme,
+    ) {
+        let padding = area
+            .width
+            .saturating_sub(label.len() as u16 + key.len() as u16 + 2);
+        let line = Line::from(vec![
+            Span::styled(label, Style::default().fg(theme.text)),
+            Span::raw(" ".repeat(padding as usize)),
+            Span::styled(format!("[{key}]"), Style::default().fg(theme.muted)),
+        ]);
+        frame.render_widget(
+            Paragraph::new(line).style(Style::default().bg(theme.panel)),
+            area,
+        );
+        self.target(area, action);
+    }
+
     fn border_button(
         &mut self,
         frame: &mut Frame,
@@ -191,7 +215,7 @@ impl Ui {
             .style(Style::default().bg(theme.panel))
             .title(Line::from(vec![Span::styled(
                 format!(" {title} "),
-                Style::default().fg(theme.accent).bold(),
+                Style::default().fg(theme.heading).bold(),
             )]));
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1731,7 +1755,7 @@ mod tests {
 
     #[test]
     fn one_focus_highlight_follows_navigation_and_dialog_choices() {
-        for name in ["ember", "glacier", "orchid"] {
+        for name in ["ember", "glacier", "orchid", "neon"] {
             for (width, height) in [(60, 10), (90, 22), (140, 42)] {
                 let mut app = App::new("/test".into(), Config::default(), vec![]);
                 app.config.theme = name.into();
@@ -1854,7 +1878,7 @@ mod tests {
 
     #[test]
     fn first_run_controls_stay_inside_panels_and_keep_visible_text() {
-        for name in ["ember", "glacier", "orchid"] {
+        for name in ["ember", "glacier", "orchid", "neon"] {
             for (width, height) in [
                 (60, 10),
                 (80, 10),

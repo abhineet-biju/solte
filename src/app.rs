@@ -299,6 +299,7 @@ impl Appearance {
                 ("ember", "Ember · warm gold"),
                 ("glacier", "Glacier · cool blue"),
                 ("orchid", "Orchid · soft violet"),
+                ("neon", "Neon · cyan & magenta"),
             ],
             Self::Motion => &[
                 ("animated", "Subtle animations"),

@@ -145,7 +145,9 @@ impl Ui {
             &format!("Wallets · {}", app.wallets.len()),
             theme,
         );
-        let count = inner.height.saturating_sub(2) as usize;
+        let spacious = inner.height >= 8;
+        let controls_height = if spacious { 4 } else { 2 };
+        let count = inner.height.saturating_sub(controls_height) as usize;
         let offset = app.wallet_cursor.saturating_sub(count.saturating_sub(1));
         for (row, (index, wallet)) in app
             .wallets
@@ -175,33 +177,37 @@ impl Ui {
         }
         if app.wallets.is_empty() {
             frame.render_widget(
-                Paragraph::new(" No identities yet").style(Style::default().fg(theme.muted)),
+                Paragraph::new("No wallets").style(Style::default().fg(theme.muted)),
                 inner,
             );
         }
-        self.button(
+        if spacious {
+            frame.render_widget(
+                Paragraph::new("─".repeat(inner.width as usize))
+                    .style(Style::default().fg(theme.border)),
+                Rect::new(inner.x, inner.bottom() - 4, inner.width, 1),
+            );
+        }
+        self.shortcut_button(
             frame,
-            Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
-            if inner.width < 20 {
-                "+ New n"
-            } else {
-                "+ New identity n"
-            },
+            Rect::new(
+                inner.x,
+                inner.bottom() - if spacious { 3 } else { 2 },
+                inner.width,
+                1,
+            ),
+            "New wallet",
+            "n",
             Action::New,
             theme,
-            false,
         );
-        self.button(
+        self.shortcut_button(
             frame,
             Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-            if inner.width < 20 {
-                "Import i"
-            } else {
-                "Import keypair i"
-            },
+            "Import",
+            "i",
             Action::Import,
             theme,
-            false,
         );
     }
 
