@@ -1,0 +1,50 @@
+name: Release binaries
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      source: ${{ github.sha }}
+  packages:
+    needs: checks
+    uses: ./.github/workflows/package.yml
+    with:
+      source: ${{ github.sha }}
+      source-ref: ${{ github.ref }}
+      channel: ${{ github.ref == 'refs/heads/main' && 'development' || 'stable' }}
+  publish:
+    needs: [checks, packages]
+    if: github.repository == 'abhineet-biju/solte'
+    concurrency:
+      group: release-${{ needs.packages.outputs.tag }}
+      cancel-in-progress: false
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-assets
+          path: release-assets
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release-assets/*
+      - name: Publish only after every platform has passed installation checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release/publish.py --assets release-assets

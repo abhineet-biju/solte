@@ -1,0 +1,149 @@
+name: Package and test binaries
+on:
+  workflow_call:
+    inputs:
+      source:
+        type: string
+        required: true
+      source-ref:
+        type: string
+        required: true
+      channel:
+        type: string
+        required: true
+    outputs:
+      tag:
+        value: ${{ jobs.plan.outputs.tag }}
+      version:
+        value: ${{ jobs.plan.outputs.version }}
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  SOURCE: ${{ inputs.source }}
+  SOURCE_REF: ${{ inputs.source-ref }}
+  CHANNEL: ${{ inputs.channel }}
+  MACOSX_DEPLOYMENT_TARGET: '11.0'
+  CARGO: ${{ github.workspace }}/scripts/release/cargo-locked.sh
+jobs:
+  plan:
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.1
+      - id: prepare
+        run: python3 scripts/release/prepare.py --channel "$CHANNEL" --source "$SOURCE" --ref "$SOURCE_REF" --run "$GITHUB_RUN_NUMBER" --attempt "$GITHUB_RUN_ATTEMPT"
+      - run: python3 scripts/release/bootstrap_dist.py --directory "$RUNNER_TEMP/dist-bin"
+      - name: Plan distribution without publishing
+        env:
+          RELEASE_TAG: ${{ steps.prepare.outputs.tag }}
+        run: '"$RUNNER_TEMP/dist-bin/dist" plan --tag "$RELEASE_TAG" --output-format=json > target/plan-dist-manifest.json'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-plan
+          path: |
+            target/release-build.json
+            target/plan-dist-manifest.json
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET: ${{ matrix.target }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.1
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: dist-${{ matrix.target }}
+      - name: Install native build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config binutils xz-utils
+      - run: python3 scripts/release/prepare.py --channel "$CHANNEL" --source "$SOURCE" --ref "$SOURCE_REF" --run "$GITHUB_RUN_NUMBER" --attempt "$GITHUB_RUN_ATTEMPT"
+      - run: python3 scripts/release/bootstrap_dist.py --directory "$RUNNER_TEMP/dist-bin"
+      - name: Build native archive from the locked dependencies
+        run: |
+          "$RUNNER_TEMP/dist-bin/dist" build --artifacts=local --target "$TARGET" --tag "$RELEASE_TAG" --print=linkage --output-format=json > target/local-dist-manifest.json
+          cp target/local-dist-manifest.json "target/distrib/$TARGET-dist-manifest.json"
+      - name: Generate an installer for the native installation test
+        run: '"$RUNNER_TEMP/dist-bin/dist" build --artifacts=global --tag "$RELEASE_TAG" --output-format=json > target/test-global-manifest.json'
+      - name: Run the packaged installer and binary natively
+        run: python3 scripts/release/test_install.py --target "$TARGET" --version "$RELEASE_VERSION" --report "target/$TARGET-install-report.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            target/distrib/*.tar.xz
+            target/distrib/*.tar.xz.sha256
+            target/distrib/*-dist-manifest.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installation-report-${{ matrix.target }}
+          path: target/${{ matrix.target }}-install-report.json
+  assemble:
+    needs: [plan, build]
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.1
+      - run: python3 scripts/release/prepare.py --channel "$CHANNEL" --source "$SOURCE" --ref "$SOURCE_REF" --run "$GITHUB_RUN_NUMBER" --attempt "$GITHUB_RUN_ATTEMPT"
+      - run: python3 scripts/release/bootstrap_dist.py --directory "$RUNNER_TEMP/dist-bin"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: target/distrib
+      - name: Generate the final installer with all four native checksums
+        run: '"$RUNNER_TEMP/dist-bin/dist" build --artifacts=global --tag "$RELEASE_TAG" --output-format=json > target/global-dist-manifest.json'
+      - run: python3 scripts/release/assemble.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-assets
+          if-no-files-found: error
+          path: target/release-assets/*
