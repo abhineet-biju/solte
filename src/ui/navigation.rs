@@ -181,9 +181,7 @@ impl Ui {
         {
             frame.buffer_mut().set_style(
                 hit.area,
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
+                Style::default().add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
             );
         }
     }

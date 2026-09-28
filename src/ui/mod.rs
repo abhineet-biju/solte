@@ -94,6 +94,71 @@ impl Ui {
         frame.render_widget(Paragraph::new(format!(" {text} ")).style(style), area);
         self.target(area, action);
     }
+    fn border_button(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        text: &str,
+        action: Action,
+        theme: Theme,
+    ) {
+        frame.render_widget(
+            Paragraph::new(format!(" {text} "))
+                .style(Style::default().fg(theme.muted).bg(theme.panel)),
+            area,
+        );
+        self.target(area, action);
+    }
+
+    fn welcome(&mut self, frame: &mut Frame, area: Rect, theme: Theme) {
+        let inset = u16::from(area.width >= 44);
+        let area = area.inner(ratatui::layout::Margin::new(inset, 0));
+        let roomy = area.height >= 8;
+        let top = area.y + u16::from(roomy);
+        frame.render_widget(
+            Paragraph::new("Your next project starts here.")
+                .style(Style::default().fg(theme.text).bold()),
+            Rect::new(area.x, top, area.width, 1),
+        );
+        frame.render_widget(
+            Paragraph::new("Create a wallet or import a Solana keypair.")
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(theme.muted)),
+            Rect::new(area.x, top + 1, area.width, 2),
+        );
+        let y = top + 3 + u16::from(roomy);
+        let side_by_side = area.width >= 39;
+        self.button(
+            frame,
+            Rect::new(area.x, y, 18.min(area.width), 1),
+            "Create wallet n",
+            Action::New,
+            theme,
+            true,
+        );
+        self.button(
+            frame,
+            Rect::new(
+                if side_by_side { area.x + 20 } else { area.x },
+                y + u16::from(!side_by_side),
+                19.min(area.width),
+                1,
+            ),
+            "Import keypair i",
+            Action::Import,
+            theme,
+            false,
+        );
+        if area.height >= 11 {
+            frame.render_widget(
+                Paragraph::new("Standard key files. Ready for Anchor and the CLI.")
+                    .wrap(Wrap { trim: true })
+                    .style(Style::default().fg(theme.muted)),
+                Rect::new(area.x, y + 3, area.width, 2),
+            );
+        }
+    }
+
     fn panel(
         &mut self,
         frame: &mut Frame,
@@ -120,13 +185,12 @@ impl Ui {
         frame.render_widget(block, area);
         self.target(area, Action::Focus(pane));
         if area.width >= 6 && area.height >= 2 {
-            self.button(
+            self.border_button(
                 frame,
                 Rect::new(area.right() - 5, area.bottom() - 1, 3, 1),
                 if app.zoomed { "−" } else { "+" },
                 Action::Expand(pane),
                 theme,
-                false,
             );
         }
         inner
@@ -397,42 +461,7 @@ impl Ui {
             return;
         }
         let Some(wallet) = app.wallet() else {
-            let lines = vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "Build with a fresh identity.",
-                    Style::default().fg(theme.text).bold(),
-                )),
-                Line::from(""),
-                Line::from("Solte discovers wallets in your project."),
-                Line::from("Create one here, or import a Solana keypair JSON."),
-                Line::from(""),
-                Line::from("Your keys stay compatible with Anchor and the CLI."),
-            ];
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .style(Style::default().fg(theme.muted))
-                    .wrap(Wrap { trim: false }),
-                body,
-            );
-            if body.height >= 12 {
-                self.button(
-                    frame,
-                    Rect::new(body.x, body.y + 9, 24.min(body.width), 1),
-                    "Create first wallet   n",
-                    Action::New,
-                    theme,
-                    true,
-                );
-                self.button(
-                    frame,
-                    Rect::new(body.x, body.y + 11, 24.min(body.width), 1),
-                    "Import keypair        i",
-                    Action::Import,
-                    theme,
-                    false,
-                );
-            }
+            self.welcome(frame, body, theme);
             return;
         };
         if app.tab == Tab::Overview && body.height >= 18 {
@@ -851,7 +880,7 @@ impl Ui {
             .panel(frame, app, area, Pane::Logs, "04  Session log", theme)
             .inner(ratatui::layout::Margin::new(1, 0));
         if area.width > 44 {
-            self.button(
+            self.border_button(
                 frame,
                 Rect::new(area.right() - 30, area.y, 17, 1),
                 if app.follow {
@@ -861,15 +890,13 @@ impl Ui {
                 },
                 Action::Follow,
                 theme,
-                false,
             );
-            self.button(
+            self.border_button(
                 frame,
                 Rect::new(area.right() - 12, area.y, 10, 1),
                 "Clear C",
                 Action::ClearLogs,
                 theme,
-                false,
             );
         }
         let end = app.logs.len().saturating_sub(app.log_scroll);
@@ -1566,6 +1593,66 @@ pub fn snapshot(app: &App, path: &Path, width: u16, height: u16) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn first_run_controls_stay_inside_panels_and_keep_visible_text() {
+        for name in ["ember", "glacier", "orchid"] {
+            for (width, height) in [
+                (60, 10),
+                (80, 10),
+                (99, 20),
+                (100, 14),
+                (100, 24),
+                (120, 30),
+                (160, 48),
+            ] {
+                let mut app = App::new("/test".into(), Config::default(), vec![]);
+                app.config.theme = name.into();
+                app.pane = Pane::Wallet;
+                for zoomed in [false, true] {
+                    app.zoomed = zoomed;
+                    let mut ui = Ui::default();
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                    let panel = ui
+                        .hits
+                        .iter()
+                        .find(|hit| hit.action == Action::Focus(Pane::Wallet))
+                        .unwrap()
+                        .area;
+                    for action in [Action::New, Action::Import] {
+                        let hit = ui
+                            .hits
+                            .iter()
+                            .find(|hit| {
+                                hit.action == action
+                                    && panel.contains((hit.area.x, hit.area.y).into())
+                            })
+                            .unwrap();
+                        let inside = panel.inner(ratatui::layout::Margin::new(1, 1));
+                        assert_eq!(
+                            hit.area.intersection(inside),
+                            hit.area,
+                            "{width}x{height} {action:?}"
+                        );
+                        let cell = &terminal.backend().buffer()[(hit.area.x + 1, hit.area.y)];
+                        assert_ne!(cell.symbol(), " ");
+                        assert_ne!(cell.fg, cell.bg, "{name} {action:?}");
+                    }
+                    for hit in ui
+                        .hits
+                        .iter()
+                        .filter(|hit| matches!(hit.action, Action::Expand(_)))
+                    {
+                        assert_eq!(
+                            terminal.backend().buffer()[(hit.area.x, hit.area.y)].bg,
+                            Theme::named(name).panel
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn layouts_render_at_supported_sizes_and_expose_mouse_actions() {

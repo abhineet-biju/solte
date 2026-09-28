@@ -182,27 +182,7 @@ impl Ui {
             return;
         }
         let Some(wallet) = app.wallet() else {
-            frame.render_widget(
-                Paragraph::new(" Create a development wallet or import an existing keypair.")
-                    .style(Style::default().fg(theme.muted)),
-                inner,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.x, inner.y + 2, 19, 1),
-                "Create wallet n",
-                Action::New,
-                theme,
-                true,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.x + 21, inner.y + 2, 18, 1),
-                "Import keypair i",
-                Action::Import,
-                theme,
-                false,
-            );
+            self.welcome(frame, inner, theme);
             return;
         };
         let balance = app.balance.map(format_sol).unwrap_or_else(|| "—".into());
