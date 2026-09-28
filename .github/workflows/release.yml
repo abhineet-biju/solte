@@ -1,12 +1,13 @@
 name: Release binaries
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
     tags: ['v*']
 permissions:
   contents: read
 jobs:
   checks:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
     uses: ./.github/workflows/checks.yml
     with:
       source: ${{ github.sha }}
@@ -16,7 +17,7 @@ jobs:
     with:
       source: ${{ github.sha }}
       source-ref: ${{ github.ref }}
-      channel: ${{ github.ref == 'refs/heads/main' && 'development' || 'stable' }}
+      channel: ${{ github.event_name == 'workflow_dispatch' && 'development' || 'stable' }}
   publish:
     needs: [checks, packages]
     if: github.repository == 'abhineet-biju/solte'

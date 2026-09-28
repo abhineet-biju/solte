@@ -2,7 +2,7 @@ name: Rust checks
 on:
   pull_request:
   push:
-    branches-ignore: [main]
+    branches: ['**']
 permissions:
   contents: read
 jobs:

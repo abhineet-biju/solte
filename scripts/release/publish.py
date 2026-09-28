@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish tested assets from a trusted push. Never replace an existing release."""
+"""Publish tested assets from an explicit release event. Never replace an existing release."""
 import argparse
 import hashlib
 import json
@@ -13,10 +13,13 @@ REPOSITORY = "abhineet-biju/solte"
 
 
 def publication(spec, event, ref, source, repository):
-    if event != "push" or repository != REPOSITORY or source != spec["source_commit"] or ref != spec["source_ref"]:
-        raise ValueError("Publication must use the exact source of a trusted push")
+    if repository != REPOSITORY or source != spec["source_commit"] or ref != spec["source_ref"]:
+        raise ValueError("Publication must use the exact source of a trusted release event")
     if spec["channel"] not in {"development", "stable"}:
         raise ValueError("Check builds cannot publish")
+    required_event = "workflow_dispatch" if spec["channel"] == "development" else "push"
+    if event != required_event:
+        raise ValueError("Development releases require manual dispatch; stable releases require a tag push")
     if spec["channel"] == "development":
         suffix = spec["version"].split("-dev.", 1)[1].split(".")
         run, attempt = int(suffix[0]), int(suffix[1])

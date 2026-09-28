@@ -74,9 +74,19 @@ To uninstall a default installation, remove `~/.local/bin/solte`. If you used a 
 
 ## Publish a development build
 
-1. Review and push the distribution commits to `main` when ready. No separate release command is needed.
-2. The **Release binaries** workflow runs application checks, then packages and tests all four native binaries.
-3. Only after every job succeeds does the publication job create a development prerelease.
+1. Push your reviewed commits to `main`. Ordinary branch pushes and pull requests run checks and packaging tests without publishing releases.
+2. Open the repository's **Actions** tab and select **Release binaries**.
+3. Click **Run workflow**, select the **main** branch, and click the green **Run workflow** button. Manual runs from other branches are skipped.
+4. The workflow checks, packages, and tests the exact commit selected when the run was dispatched. Only after every job succeeds does it publish a development prerelease.
+5. Open **Releases** and copy the version-specific installer command from the new prerelease's notes.
+
+The manual button becomes available after this workflow is pushed to the default branch. No version bump is needed for development releases. With an authenticated GitHub CLI, the equivalent explicit command is:
+
+```sh
+gh workflow run release.yml --ref main --repo abhineet-biju/solte
+```
+
+There is no release schedule to maintain. Publish a prerelease when you have a useful set of changes for testers.
 
 For a committed package version of `0.1.0`, development versions have the form `0.1.1-dev.RUN.ATTEMPT.gSHA12`. Run and attempt numbers make every build unique, including reruns. The full source commit is recorded in release notes and `release-build.json`.
 
@@ -86,12 +96,12 @@ Development releases explicitly use `prerelease: true` and `make_latest: false`.
 
 ## Publish a stable release deliberately
 
-Stable publication requires an exact `vMAJOR.MINOR.PATCH` tag matching the committed Cargo package version. A push to `main` alone always produces a development prerelease.
+Stable publication requires an exact `vMAJOR.MINOR.PATCH` tag matching the committed Cargo package version. A push to `main` alone runs checks and never publishes a release.
 
 For a first stable `v0.2.0`:
 
 1. Change the package version in `Cargo.toml` to `0.2.0`. Run `cargo check` to update the root entry in `Cargo.lock`, then review that dependencies did not change.
-2. Run the checks below, commit both version files, and push the reviewed commit to `main`. This push produces a development prerelease, not a stable release.
+2. Run the checks below, commit both version files, and push the reviewed commit to `main`. This push runs checks without publishing.
 3. Deliberately create and push the stable tag on that commit:
 
 ```sh

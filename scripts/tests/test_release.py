@@ -80,7 +80,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(a["version"], "0.1.1-dev.17.1.gabc123400000")
         self.assertNotEqual(a["version"], b["version"])
         self.assertTrue(a["prerelease"])
-        policy = publication(a, "push", "refs/heads/main", SHA, "abhineet-biju/solte")
+        policy = publication(a, "workflow_dispatch", "refs/heads/main", SHA, "abhineet-biju/solte")
         self.assertEqual(policy["make_latest"], "false")
 
     def test_stable_requires_exact_explicit_tag(self):
@@ -88,12 +88,22 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 select("stable", "0.2.0", SHA, ref, 1, 1)
         spec = select("stable", "0.2.0", SHA, "refs/tags/v0.2.0", 1, 1)
+        with self.assertRaises(ValueError):
+            publication(spec, "workflow_dispatch", spec["source_ref"], SHA, "abhineet-biju/solte")
         self.assertFalse(spec["prerelease"])
         self.assertEqual(publication(spec, "push", spec["source_ref"], SHA, "abhineet-biju/solte")["make_latest"], "legacy")
 
     def test_untrusted_or_check_events_cannot_publish(self):
         spec = select("development", "0.1.0", SHA, "refs/heads/main", 1, 1)
-        for event, ref, source, repo in [("pull_request", "refs/heads/main", SHA, "abhineet-biju/solte"), ("push", "refs/heads/other", SHA, "abhineet-biju/solte"), ("push", "refs/heads/main", "f" * 40, "abhineet-biju/solte"), ("push", "refs/heads/main", SHA, "fork/solte")]:
+        cases = [
+            ("push", "refs/heads/main", SHA, "abhineet-biju/solte"),
+            ("pull_request", "refs/heads/main", SHA, "abhineet-biju/solte"),
+            ("workflow_dispatch", "refs/heads/other", SHA, "abhineet-biju/solte"),
+            ("workflow_dispatch", "refs/tags/v0.1.0", SHA, "abhineet-biju/solte"),
+            ("workflow_dispatch", "refs/heads/main", "f" * 40, "abhineet-biju/solte"),
+            ("workflow_dispatch", "refs/heads/main", SHA, "fork/solte"),
+        ]
+        for event, ref, source, repo in cases:
             with self.assertRaises(ValueError):
                 publication(spec, event, ref, source, repo)
         check = select("check", "0.1.0", SHA, "refs/heads/main", 1, 1)
@@ -101,7 +111,7 @@ class ReleaseTests(unittest.TestCase):
             publication(check, "push", "refs/heads/main", SHA, "abhineet-biju/solte")
         forged = dict(spec, prerelease=False)
         with self.assertRaises(ValueError):
-            publication(forged, "push", "refs/heads/main", SHA, "abhineet-biju/solte")
+            publication(forged, "workflow_dispatch", "refs/heads/main", SHA, "abhineet-biju/solte")
 
     def test_stamp_changes_only_root_versions(self):
         with tempfile.TemporaryDirectory() as directory:
