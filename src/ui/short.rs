@@ -19,14 +19,22 @@ impl Ui {
             Paragraph::new(Line::from(vec![
                 Span::styled(" S O L T E", Style::default().fg(theme.heading).bold()),
                 Span::styled(
-                    format!(
-                        " · {} · {}{}",
-                        app.profile().name,
-                        app.wallet()
-                            .map(|wallet| wallet.name.as_str())
-                            .unwrap_or("No wallet"),
-                        if app.demo { " · DEMO" } else { "" }
-                    ),
+                    if app.view == View::Overview {
+                        if app.demo {
+                            " · DEMO".into()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        format!(
+                            " · {} · {}{}",
+                            app.profile().name,
+                            app.wallet()
+                                .map(|wallet| wallet.name.as_str())
+                                .unwrap_or("No wallet"),
+                            if app.demo { " · DEMO" } else { "" }
+                        )
+                    },
                     Style::default().fg(theme.text),
                 ),
             ])),

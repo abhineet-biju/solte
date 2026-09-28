@@ -316,21 +316,23 @@ impl Ui {
             .style(Style::default().fg(theme.text).bold()),
             Rect::new(area.x + 24, area.y, area.width.saturating_sub(51), 1),
         );
-        let project = app
-            .root
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("project");
-        frame.render_widget(
-            Paragraph::new(format!(
-                "{} · {project}",
-                app.wallet()
-                    .map(|wallet| wallet.name.as_str())
-                    .unwrap_or("No wallet selected"),
-            ))
-            .style(Style::default().fg(theme.muted)),
-            Rect::new(area.x + 24, area.y + 1, area.width.saturating_sub(46), 1),
-        );
+        if app.view != View::Overview {
+            let project = app
+                .root
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("project");
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{} · {project}",
+                    app.wallet()
+                        .map(|wallet| wallet.name.as_str())
+                        .unwrap_or("No wallet selected"),
+                ))
+                .style(Style::default().fg(theme.muted)),
+                Rect::new(area.x + 24, area.y + 1, area.width.saturating_sub(46), 1),
+            );
+        }
         self.button(
             frame,
             Rect::new(area.right() - 21, area.y + 1, 10, 1),
@@ -361,7 +363,7 @@ impl Ui {
             );
             x += width + 1;
         }
-        if area.width > 84 {
+        if app.view != View::Overview && area.width > 84 {
             let mut name = clean_text(&app.profile().name);
             if Line::from(name.as_str()).width() > 15 {
                 while Line::from(name.as_str()).width() > 14 {
@@ -1772,6 +1774,29 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn overview_header_omits_context_while_dedicated_views_retain_it() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        for (width, height) in [(90, 22), (140, 42)] {
+            for view in View::ALL {
+                app.switch_view(view);
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                let header_rows = if height < 24 { 1 } else { 3 };
+                let text: String = (0..header_rows)
+                    .flat_map(|y| (0..width).map(move |x| (x, y)))
+                    .map(|pos| terminal.backend().buffer()[pos].symbol())
+                    .collect();
+                assert_eq!(text.contains("dev.wallet"), view != View::Overview);
+                assert_eq!(text.contains("Devnet"), view != View::Overview);
+                assert!(text.contains("DEMO"));
+                assert!(text.contains("Theme [t]") && text.contains("Motion [m]"));
+            }
+        }
     }
 
     #[test]
