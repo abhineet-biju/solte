@@ -38,6 +38,8 @@ solte --demo --snapshot view.svg # Render the actual terminal buffer to SVG
 
 Solte discovers the nearest project through `.solte/config.toml`, `Anchor.toml`, or `.git`. It reads the Anchor provider wallet and valid keypair JSON files in the project root, `keys/`, `wallets/`, `.solte/keys/`, and `target/deploy/`. Program keypairs in `target/deploy/` appear as read-only identities.
 
+Project discovery stops before your home directory. A home-level `.solte` directory does not make unrelated subfolders share its wallets. Without a project marker, Solte uses the directory you launched it from. Launching directly from home still uses home; new wallets are saved under the selected project's `.solte/keys/`.
+
 Create a wallet with `n` or **New identity**. New keys use standard Solana JSON in `.solte/keys/`; existing names are never overwritten. Imported keys stay at their original paths. Both remain usable with Anchor and the Solana CLI.
 
 In **Wallets**, moving the selection previews an identity; clicking it or pressing Enter opens its details at any supported terminal size. Use **Copy address [y]** without changing the active wallet. **Use wallet [Enter]** explicitly activates the inspected identity. The `y` shortcut in the Wallets view also copies the highlighted identity directly. Overview wallet shortcuts and `]` still provide quick activation.

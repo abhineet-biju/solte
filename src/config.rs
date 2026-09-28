@@ -126,14 +126,23 @@ impl Config {
 }
 
 pub fn project_root(start: &Path) -> Result<PathBuf> {
+    let home = directories::BaseDirs::new().and_then(|dirs| dirs.home_dir().canonicalize().ok());
+    project_root_with_home(start, home.as_deref())
+}
+
+fn project_root_with_home(start: &Path, home: Option<&Path>) -> Result<PathBuf> {
     let start = start
         .canonicalize()
         .context("Project directory does not exist")?;
     if !start.is_dir() {
         bail!("Project path must be a directory");
     }
+    if Some(start.as_path()) == home {
+        return Ok(start);
+    }
     Ok(start
         .ancestors()
+        .take_while(|path| Some(*path) != home)
         .find(|p| {
             p.join(".solte/config.toml").is_file()
                 || p.join("Anchor.toml").is_file()
@@ -173,6 +182,59 @@ pub fn private_dir(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_wallets_do_not_capture_unrelated_subdirectories() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().canonicalize().unwrap();
+        Config::default().save(&home).unwrap();
+        let original = crate::wallet::create(&home, "home-wallet").unwrap();
+        let original_bytes = fs::read(&original.path).unwrap();
+        for name in ["projects/first", "projects/second"] {
+            let project = home.join(name);
+            fs::create_dir_all(&project).unwrap();
+            let root = project_root_with_home(&project, Some(&home)).unwrap();
+            assert_eq!(root, project);
+            let config = Config::load(&root).unwrap();
+            assert!(crate::wallet::discover(&root, &config).0.is_empty());
+            let wallet = crate::wallet::create(&root, "local-wallet").unwrap();
+            assert_eq!(wallet.path, project.join(".solte/keys/local-wallet.json"));
+        }
+        assert_eq!(fs::read(&original.path).unwrap(), original_bytes);
+        assert!(!home.join(".solte/keys/local-wallet.json").exists());
+        assert_eq!(project_root_with_home(&home, Some(&home)).unwrap(), home);
+    }
+
+    #[test]
+    fn project_detection_stops_at_home_but_preserves_nested_projects() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().canonicalize().unwrap();
+        fs::create_dir(parent.join(".git")).unwrap();
+        let home = parent.join("home");
+        let project = home.join("project");
+        let nested = project.join("tests");
+        fs::create_dir_all(&nested).unwrap();
+        assert_eq!(project_root_with_home(&home, Some(&home)).unwrap(), home);
+        assert_eq!(
+            project_root_with_home(&nested, Some(&home)).unwrap(),
+            nested
+        );
+        fs::create_dir(home.join(".git")).unwrap();
+        assert_eq!(
+            project_root_with_home(&nested, Some(&home)).unwrap(),
+            nested
+        );
+        for marker in [".git", "Anchor.toml", ".solte/config.toml"] {
+            let path = project.join(marker);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "").unwrap();
+            assert_eq!(
+                project_root_with_home(&nested, Some(&home)).unwrap(),
+                project
+            );
+            fs::remove_file(path).unwrap();
+        }
+    }
 
     #[test]
     fn detects_anchor_project_from_nested_directory() {
