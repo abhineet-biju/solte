@@ -833,7 +833,7 @@ impl Ui {
         let inner = self
             .panel(frame, app, area, Pane::Network, "Network", theme)
             .inner(ratatui::layout::Margin::new(1, 0));
-        let n = app.network.as_ref();
+        let n = app.network.as_ref().filter(|_| app.connected);
         let text = |label: &str, value: String, color| {
             Line::from(vec![
                 Span::styled(format!("{label:<13}"), Style::default().fg(theme.muted)),
@@ -1761,6 +1761,36 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn disconnected_network_does_not_present_cached_telemetry_as_current() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.connected = false;
+        for view in [View::Overview, View::Network] {
+            app.switch_view(view);
+            for (width, height) in [(90, 22), (140, 42)] {
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(text.contains("Offline"));
+                assert!(!text.contains("Healthy"));
+                assert!(!text.contains("42 ms"));
+                assert!(!text.contains("415239881"));
+            }
+        }
+        assert!(
+            app.network.is_some(),
+            "Keep verified network identity for operation guards"
+        );
     }
 
     #[test]

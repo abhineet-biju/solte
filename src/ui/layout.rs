@@ -207,7 +207,7 @@ impl Ui {
 
     fn network_sidebar(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
         let inner = self.panel(frame, app, area, Pane::Network, "RPC / Network", theme);
-        let state = app.network.as_ref();
+        let state = app.network.as_ref().filter(|_| app.connected);
         let number =
             |value: Option<u64>| value.map(|v| v.to_string()).unwrap_or_else(|| "—".into());
         let fields = [

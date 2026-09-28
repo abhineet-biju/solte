@@ -65,6 +65,7 @@ async fn server(genesis: &'static str) -> MockRpc {
                 saved.lock().unwrap().push(request.clone());
                 let value = match request["method"].as_str().unwrap() {
                     "getGenesisHash" => json!(genesis),
+                    "getBlockHeight" => json!(201),
                     "getVersion" => json!({"solana-core":"3.1.0","feature-set":1}),
                     "getLatestBlockhash" => {
                         json!({"context":{"slot":1},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":200}})
@@ -171,4 +172,48 @@ async fn rejected_devnet_airdrop_offers_web_recovery_without_reporting_submissio
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn submission_rejects_failed_expired_and_changed_network_reviews() {
+    for failure in ["simulation", "expired", "network"] {
+        let mock = server(solte::network::DEVNET_GENESIS).await;
+        let temp = tempfile::tempdir().unwrap();
+        let wallet = wallet::create(temp.path(), "payer").unwrap();
+        let recipient = wallet::create(temp.path(), "recipient").unwrap();
+        let mut prepared =
+            operations::prepare(&mock.profile, &wallet, &recipient.address, 1_000_000)
+                .await
+                .unwrap();
+        let expected = match failure {
+            "simulation" => {
+                prepared.simulation_error = Some("InsufficientFunds".into());
+                "Simulation failed"
+            }
+            "network" => {
+                prepared.genesis = "different-network".into();
+                "RPC network changed"
+            }
+            _ => "Review expired",
+        };
+        mock.requests.lock().unwrap().clear();
+        let store = solte::storage::Store::open(temp.path()).unwrap();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+        operations::submit(prepared, 42, store, sender).await;
+        let event = receiver.recv().await.unwrap();
+        assert_eq!(event.session, 42);
+        match event.update {
+            operations::OperationUpdate::Failed(message) => assert!(message.contains(expected)),
+            _ => panic!("Invalid review must fail before submission"),
+        }
+        assert!(receiver.try_recv().is_err());
+        assert!(
+            !mock
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r["method"] == "sendTransaction")
+        );
+    }
 }

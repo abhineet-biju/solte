@@ -94,6 +94,8 @@ def main():
             seller = root / ".solte/keys/seller.json"
             wait_for(seller.exists)
             drain(0.5)
+            send(b"y")
+            assert b"\x1b]52;" in output, "Copy must emit an OSC 52 clipboard request"
             send(b"t")
             assert b"Choose theme" in output
             send(b"j\x1b")
