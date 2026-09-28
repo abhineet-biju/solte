@@ -15,6 +15,7 @@ use crate::{
 type Reply<T> = oneshot::Sender<Result<T>>;
 
 enum Request {
+    Config(std::path::PathBuf, crate::config::Config, Reply<()>),
     Load(String, Reply<Vec<TransactionRecord>>),
     Save(String, String, Vec<TransactionRecord>, Reply<()>),
     Log(String, LogEntry, Reply<()>),
@@ -50,6 +51,9 @@ impl Store {
                 let mut conn = conn;
                 while let Some(request) = receiver.blocking_recv() {
                     match request {
+                        Request::Config(root, config, reply) => {
+                            let _ = reply.send(config.save(&root));
+                        }
                         Request::Load(scope, reply) => {
                             let _ = reply.send(load(&conn, &scope));
                         }
@@ -66,6 +70,14 @@ impl Store {
                 }
             })?;
         Ok(Self { sender })
+    }
+
+    pub async fn config(&self, root: &Path, config: crate::config::Config) -> Result<()> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::Config(root.into(), config, send))
+            .await?;
+        receive.await?
     }
 
     pub async fn load(&self, scope: &str) -> Result<Vec<TransactionRecord>> {

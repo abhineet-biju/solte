@@ -48,6 +48,7 @@ pub enum FormKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    ForceQuit,
     Quit,
     Focus(Pane),
     CycleFocus(bool),
@@ -366,7 +367,7 @@ impl App {
     }
     pub fn key(&mut self, key: KeyEvent) -> Option<Action> {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return Some(Action::Quit);
+            return Some(Action::ForceQuit);
         }
         if let Some(modal) = &mut self.modal {
             if let Modal::Form(form) = modal {

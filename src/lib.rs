@@ -1,9 +1,11 @@
 pub mod amount;
 pub mod app;
 pub mod config;
+pub mod demo;
 pub mod model;
 pub mod network;
 pub mod operations;
+pub mod runtime;
 pub mod storage;
 pub mod ui;
 pub mod wallet;
