@@ -310,6 +310,7 @@ pub struct App {
     pub transaction_cursor: usize,
     pub filter: String,
     pub failures_only: bool,
+    pub history_loading: bool,
     pub logs: VecDeque<LogEntry>,
     pub log_scroll: usize,
     pub follow: bool,
@@ -349,6 +350,7 @@ impl App {
             transaction_cursor: 0,
             filter: String::new(),
             failures_only: false,
+            history_loading: false,
             logs: VecDeque::new(),
             log_scroll: 0,
             follow: true,
@@ -607,6 +609,19 @@ impl App {
             }
             Action::Failures => {
                 self.failures_only = !self.failures_only;
+                self.pane = Pane::Wallet;
+                self.tab = Tab::Transactions;
+                self.status = if self.failures_only {
+                    format!(
+                        "Errors filter on · {} matching failed transactions · e shows all",
+                        self.visible_records().len()
+                    )
+                } else {
+                    format!(
+                        "Errors filter off · {} matching transactions",
+                        self.visible_records().len()
+                    )
+                };
                 self.transaction_cursor = 0;
             }
             Action::Help => self.modal = Some(Modal::Help { scroll: 0 }),
@@ -632,6 +647,27 @@ fn move_index(index: usize, delta: i32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_filter_opens_activity_and_restores_all_records() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        let total = app.records.len();
+        app.navigate(&Action::Failures);
+        assert_eq!(app.tab, Tab::Transactions);
+        assert_eq!(app.pane, Pane::Wallet);
+        assert!(
+            app.visible_records()
+                .iter()
+                .all(|record| record.error.is_some())
+        );
+        assert!(app.visible_records().len() < total);
+        app.navigate(&Action::Failures);
+        assert_eq!(app.visible_records().len(), total);
+        app.records.clear();
+        app.navigate(&Action::Failures);
+        assert!(app.status.contains("0 matching failed"));
+    }
 
     #[test]
     fn text_input_handles_unicode_and_does_not_trigger_shortcuts() {

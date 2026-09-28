@@ -34,6 +34,7 @@ pub const DEVNET_GENESIS: &str = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 #[derive(Debug)]
 pub enum Update {
     Records(Vec<TransactionRecord>),
+    HistoryFinished(Result<usize, String>),
     Network(NetworkState, Option<u64>),
     Offline(String),
     Subscription(bool),
@@ -184,8 +185,32 @@ async fn run(
             if matches!(command, Command::Older) {
                 limit = (limit + 250).min(10_000);
             }
-            if let Ok(records) = store.load_limit(&scope, limit).await {
-                emit(&sender, session, Update::Records(records)).await;
+            match store.load_limit(&scope, limit).await {
+                Ok(loaded) => {
+                    let added = loaded
+                        .iter()
+                        .filter(|record| !records.contains_key(&record.signature))
+                        .count();
+                    records = loaded
+                        .iter()
+                        .cloned()
+                        .map(|record| (record.signature.clone(), record))
+                        .collect();
+                    emit(&sender, session, Update::Records(loaded)).await;
+                    if matches!(command, Command::Older) {
+                        emit(&sender, session, Update::HistoryFinished(Ok(added))).await;
+                    }
+                }
+                Err(error) => {
+                    if matches!(command, Command::Older) {
+                        emit(
+                            &sender,
+                            session,
+                            Update::HistoryFinished(Err(error.to_string())),
+                        )
+                        .await;
+                    }
+                }
             }
         }
         return;
@@ -279,6 +304,11 @@ async fn run(
         if matches!(command, Command::Older) {
             display_limit = (display_limit + 250).min(10_000);
         }
+        let previous: HashSet<_> = if matches!(command, Command::Older) {
+            records.keys().cloned().collect()
+        } else {
+            HashSet::new()
+        };
         let result = tokio::time::timeout(
             Duration::from_secs(45),
             refresh(
@@ -300,6 +330,13 @@ async fn run(
                 last_error.clear();
                 emit(&sender, session, Update::Network(network, balance)).await;
                 emit(&sender, session, Update::Records(sorted(&records))).await;
+                if matches!(command, Command::Older) {
+                    let added = records
+                        .keys()
+                        .filter(|signature| !previous.contains(*signature))
+                        .count();
+                    emit(&sender, session, Update::HistoryFinished(Ok(added))).await;
+                }
                 for warning in warnings {
                     emit(
                         &sender,
@@ -315,6 +352,14 @@ async fn run(
                     _ => "RPC refresh timed out; retaining captured records".into(),
                 };
                 emit(&sender, session, Update::Offline(message.clone())).await;
+                if matches!(command, Command::Older) {
+                    emit(
+                        &sender,
+                        session,
+                        Update::HistoryFinished(Err(message.clone())),
+                    )
+                    .await;
+                }
                 if message != last_error {
                     emit(
                         &sender,
@@ -662,6 +707,39 @@ pub fn explorer_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn older_cached_history_reports_added_records_and_exhaustion() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::open(temp.path()).unwrap();
+        let profile = RpcProfile::devnet();
+        let scope = storage::scope(&profile.http, "wallet");
+        let records = (0..1100)
+            .map(|slot| TransactionRecord {
+                signature: format!("signature-{slot}"),
+                slot,
+                timestamp: None,
+                error: None,
+                details: None,
+            })
+            .collect();
+        store.save(&scope, DEVNET_GENESIS, records).await.unwrap();
+        let (sender, mut receiver) = mpsc::channel(16);
+        let monitor = start(1, Some("wallet".into()), profile, store, sender, true);
+        for expected in [100, 0] {
+            monitor.commands.send(Command::Older).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if let Update::HistoryFinished(result) = receiver.recv().await.unwrap().update {
+                        assert_eq!(result.unwrap(), expected);
+                        break;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+        }
+    }
 
     #[test]
     fn explorer_links_keep_cluster_and_do_not_export_credentials() {

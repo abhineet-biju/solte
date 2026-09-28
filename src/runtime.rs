@@ -50,6 +50,7 @@ impl Services {
         }
         app.session += 1;
         app.records.clear();
+        app.history_loading = false;
         app.transaction_cursor = 0;
         app.balance = None;
         app.network = None;
@@ -196,6 +197,16 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 if event.session != app.session { continue; }
                 match event.update {
                     Update::Records(records) => app.replace_records(records),
+                    Update::HistoryFinished(result) => {
+                        app.history_loading = false;
+                        let (level, message) = match result {
+                            Ok(0) => ("INFO", "No additional history available from this source".into()),
+                            Ok(count) => ("INFO", format!("Loaded {count} additional transactions · scroll down to view")),
+                            Err(message) => ("WARN", format!("Older history failed: {message}")),
+                        };
+                        app.status = message.clone();
+                        app.log(level, message);
+                    },
                     Update::Network(network, balance) => {
                         app.status = format!("{} · confirmed activity · captured history stored locally", network.cluster);
                         app.network = Some(network); app.balance = balance; app.connected = true; app.last_update = Some(Instant::now());
@@ -418,7 +429,28 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             }
         }
         Action::Refresh => services.command(Command::Refresh),
-        Action::Older => services.command(Command::Older),
+        Action::Older => {
+            app.pane = Pane::Wallet;
+            app.tab = crate::app::Tab::Transactions;
+            if app.history_loading {
+                return Ok(false);
+            }
+            if app.demo {
+                app.status = "Demo history is fixed; no older transactions to load".into();
+            } else if app.wallet().is_none() {
+                app.status = "Select a wallet before loading older history".into();
+            } else if services
+                .monitor
+                .as_ref()
+                .is_some_and(|monitor| monitor.commands.try_send(Command::Older).is_ok())
+            {
+                app.history_loading = true;
+                app.status = "Loading older history…".into();
+            } else {
+                app.status = "History worker unavailable or busy; try again shortly".into();
+                app.log("WARN", app.status.clone());
+            }
+        }
         Action::Inspect => {
             if let Some(record) = app.selected_transaction() {
                 let signature = record.signature.clone();

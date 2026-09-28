@@ -275,8 +275,12 @@ impl Ui {
         }
         if visible.is_empty() {
             frame.render_widget(
-                Paragraph::new(" No matching captured transactions.")
-                    .style(Style::default().fg(theme.muted)),
+                Paragraph::new(if app.failures_only {
+                    " No matching failed transactions. e shows all."
+                } else {
+                    " No matching captured transactions."
+                })
+                .style(Style::default().fg(theme.muted)),
                 Rect::new(inner.x, inner.y + 2, inner.width, 1),
             );
         }
@@ -292,7 +296,11 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x + 11, y, 12, 1),
-            "Errors e",
+            if app.failures_only {
+                "Errors ✓ e"
+            } else {
+                "Errors e"
+            },
             Action::Failures,
             theme,
             app.failures_only,
@@ -300,7 +308,11 @@ impl Ui {
         self.button(
             frame,
             Rect::new(inner.x + 24, y, 12, 1),
-            "Older b",
+            if app.history_loading {
+                "Loading…"
+            } else {
+                "Older b"
+            },
             Action::Older,
             theme,
             false,

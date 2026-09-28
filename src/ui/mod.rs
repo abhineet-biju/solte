@@ -561,7 +561,15 @@ impl Ui {
         }
         let visible = app.visible_records();
         let heading = if app.filter.is_empty() {
-            format!("ACTIVITY  ·  {} captured", visible.len())
+            format!(
+                "{}  ·  {} captured",
+                if app.failures_only {
+                    "ERRORS"
+                } else {
+                    "ACTIVITY"
+                },
+                visible.len()
+            )
         } else {
             format!("FILTER  {}", clean_text(&app.filter))
         };
@@ -581,7 +589,11 @@ impl Ui {
             self.button(
                 frame,
                 Rect::new(area.right() - 9, area.y, 9, 1),
-                "Errors e",
+                if app.failures_only {
+                    "All e"
+                } else {
+                    "Errors e"
+                },
                 Action::Failures,
                 theme,
                 app.failures_only,
@@ -670,7 +682,9 @@ impl Ui {
         }
         if visible.is_empty() && table_area.height > 3 {
             frame.render_widget(
-                Paragraph::new(if app.connected {
+                Paragraph::new(if app.failures_only {
+                    "No matching failed transactions. Press e to show all."
+                } else if app.connected {
                     "No matching transactions in captured history."
                 } else {
                     "Waiting for history. Cached records appear here."
@@ -699,7 +713,11 @@ impl Ui {
                 self.button(
                     frame,
                     Rect::new(area.right() - 16, y, 16, 1),
-                    "Older history b",
+                    if app.history_loading {
+                        "Loading…"
+                    } else {
+                        "Older history b"
+                    },
                     Action::Older,
                     theme,
                     false,
