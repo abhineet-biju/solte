@@ -143,6 +143,16 @@ impl Ui {
                     .style(Style::default().fg(theme.border)),
                 Rect::new(inner.x, content.bottom(), inner.width, 1),
             );
+            frame.render_widget(
+                Paragraph::new("─".repeat(inner.width.saturating_sub(2) as usize))
+                    .style(Style::default().fg(theme.border)),
+                Rect::new(
+                    inner.x + 1,
+                    inner.bottom() - 2,
+                    inner.width.saturating_sub(2),
+                    1,
+                ),
+            );
         }
     }
 
@@ -267,7 +277,7 @@ impl Ui {
 
 fn sidebar_sections(inner: Rect) -> (Rect, Rect, Rect) {
     let spacious = inner.height >= 8;
-    let reserved = if spacious { 3 } else { 2 };
+    let reserved = if spacious { 4 } else { 2 };
     (
         Rect::new(
             inner.x,
@@ -275,7 +285,12 @@ fn sidebar_sections(inner: Rect) -> (Rect, Rect, Rect) {
             inner.width,
             inner.height.saturating_sub(reserved),
         ),
-        Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
+        Rect::new(
+            inner.x,
+            inner.bottom() - if spacious { 3 } else { 2 },
+            inner.width,
+            1,
+        ),
         Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
     )
 }
