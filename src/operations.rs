@@ -115,10 +115,12 @@ pub async fn submit(
         if rpc.get_block_height().await? > prepared.last_valid_block_height {
             bail!("Review expired. Prepare the transfer again for a fresh blockhash.");
         }
-        let signer = prepared.wallet.signer()?;
-        prepared
-            .transaction
-            .try_sign(&[&signer], prepared.transaction.message.recent_blockhash)?;
+        {
+            let signer = prepared.wallet.signer()?;
+            prepared
+                .transaction
+                .try_sign(&[&signer], prepared.transaction.message.recent_blockhash)?;
+        }
         let signature = prepared.transaction.signatures[0];
         persist(
             &store,

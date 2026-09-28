@@ -4370,6 +4370,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "url",
+ "zeroize",
 ]
 
 [[package]]

@@ -1,13 +1,13 @@
 use std::{
     collections::HashSet,
     fs::{self, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
-use solana_keypair::{Keypair, read_keypair_file};
+use solana_keypair::Keypair;
 use solana_signer::Signer;
+use zeroize::Zeroizing;
 
 use crate::config::{Config, expand_path, private_dir};
 
@@ -25,8 +25,8 @@ impl Wallet {
         if fs::metadata(&path)?.len() > 4096 {
             bail!("Keypair file is unexpectedly large");
         }
-        let keypair =
-            read_keypair_file(&path).map_err(|_| anyhow::anyhow!("Invalid Solana keypair JSON"))?;
+        let keypair = crate::keyfile::read(&path)
+            .map_err(|_| anyhow::anyhow!("Invalid Solana keypair JSON"))?;
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -45,7 +45,7 @@ impl Wallet {
         if self.program {
             bail!("Program identity is read-only; select a development wallet to sign");
         }
-        let keypair = read_keypair_file(&self.path)
+        let keypair = crate::keyfile::read(&self.path)
             .map_err(|_| anyhow::anyhow!("Cannot read wallet keypair"))?;
         if keypair.pubkey().to_string() != self.address {
             bail!("Keypair file changed; reload the wallet before signing");
@@ -130,9 +130,15 @@ pub fn create(root: &Path, name: &str) -> Result<Wallet> {
     let mut file = options
         .open(&path)
         .context("Cannot create keypair; that name may already exist")?;
-    file.write_all(serde_json::to_string(&keypair.to_bytes().to_vec())?.as_bytes())?;
+    let bytes = Zeroizing::new(keypair.to_bytes());
+    serde_json::to_writer(&mut file, bytes.as_slice())?;
     file.sync_all()?;
-    Wallet::load(&path, Some(name))
+    Ok(Wallet {
+        name: name.into(),
+        address: keypair.pubkey().to_string(),
+        path,
+        program: false,
+    })
 }
 
 #[cfg(test)]
