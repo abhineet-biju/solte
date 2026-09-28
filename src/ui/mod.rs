@@ -1121,13 +1121,7 @@ impl Ui {
                 )));
             }
             frame.render_widget(
-                Paragraph::new(lines).style(Style::default().bg(
-                    if index == cursor && app.pane == Pane::Logs {
-                        theme.selected
-                    } else {
-                        theme.panel
-                    },
-                )),
+                Paragraph::new(lines).style(Style::default().bg(theme.panel)),
                 rect,
             );
             self.target(rect, Action::SelectLog(index));
@@ -1876,6 +1870,28 @@ mod tests {
             }
         }
         assert_eq!(buffer[(hit.area.x, hit.area.y)].bg, theme.accent);
+    }
+
+    #[test]
+    fn log_rows_only_highlight_when_they_have_keyboard_focus() {
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.switch_view(View::Logs);
+        app.focused_control = Some(Action::Follow);
+        let theme = Theme::named(&app.config.theme);
+        let mut ui = Ui::default();
+        let mut terminal = Terminal::new(TestBackend::new(90, 22)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        let row = ui
+            .hits
+            .iter()
+            .find(|hit| hit.action == Action::SelectLog(0))
+            .unwrap()
+            .area;
+        assert_eq!(terminal.backend().buffer()[(row.x, row.y)].bg, theme.panel);
+        app.focused_control = Some(Action::SelectLog(0));
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        assert_eq!(terminal.backend().buffer()[(row.x, row.y)].bg, theme.accent);
     }
 
     #[test]
