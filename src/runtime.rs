@@ -28,6 +28,10 @@ use crate::{
 };
 
 enum LocalEvent {
+    Tokens {
+        session: u64,
+        result: Result<crate::tokens::Snapshot>,
+    },
     Wallet(Result<Wallet>),
     Notice(Result<String>),
 }
@@ -51,6 +55,14 @@ impl Services {
         app.resume_logs();
         app.session += 1;
         app.records.clear();
+        app.tokens.clear();
+        app.token_cursor = 0;
+        app.token_loading = false;
+        app.token_updated = None;
+        app.token_genesis = None;
+        app.token_error = None;
+        app.token_export = None;
+        app.token_warnings.clear();
         app.history_loading = false;
         app.refresh = RefreshState::Idle;
         app.transaction_cursor = 0;
@@ -77,6 +89,31 @@ impl Services {
             self.network_sender.clone(),
             self.offline,
         ));
+    }
+    fn load_tokens(&mut self, app: &mut App) {
+        if app.demo || app.token_loading {
+            return;
+        }
+        if self.offline {
+            app.token_error = Some("Token accounts are unavailable offline".into());
+            return;
+        }
+        let Some(wallet) = app.wallet() else {
+            return;
+        };
+        let owner = wallet.address.clone();
+        let profile = app.profile().clone();
+        let session = app.session;
+        let sender = self.local_sender.clone();
+        app.token_loading = true;
+        app.token_error = None;
+        self.jobs.spawn(async move {
+            let result =
+                async { crate::tokens::fetch(&network::client(&profile), &owner.parse()?).await }
+                    .await
+                    .map_err(|error| anyhow::anyhow!(network::safe_error(error, &profile)));
+            let _ = sender.send(LocalEvent::Tokens { session, result }).await;
+        });
     }
     fn command(&self, command: Command) {
         if let Some(monitor) = &self.monitor {
@@ -241,6 +278,21 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 }
             },
             Some(event) = local_receiver.recv() => match event {
+                LocalEvent::Tokens { session, result } => if session == app.session {
+                    app.token_loading = false;
+                    match result {
+                        Ok(snapshot) => {
+                            let selected = app.selected_token().map(|a| a.address.clone());
+                            app.tokens = snapshot.accounts; app.token_genesis = Some(snapshot.genesis);
+                            app.token_warnings = snapshot.warnings; app.token_updated = Some(Instant::now());
+                            app.token_error = None;
+                            app.token_cursor = app.visible_tokens().iter().position(|a| Some(&a.address) == selected.as_ref()).unwrap_or(0);
+                            if matches!(app.focused_control, Some(Action::SelectToken(_))) { app.focused_control = Some(Action::SelectToken(app.token_cursor)); }
+                            app.status = format!("Token accounts refreshed · {} accounts{}", app.tokens.len(), if app.token_warnings.is_empty() { "" } else { " · partial coverage" });
+                        }
+                        Err(error) => { app.token_error = Some(error.to_string()); app.status = format!("Token refresh failed: {error}"); }
+                    }
+                },
                 LocalEvent::Wallet(result) => {
                     app.busy = None;
                     match result {
@@ -265,6 +317,17 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
             },
             _ = animation_tick.tick(), if ui.animating() || (!app.config.reduced_motion && matches!(app.refresh, RefreshState::Pending(_))) => {},
             _ = status_tick.tick() => {},
+        }
+        if app.view == crate::app::View::Tokens
+            && !app.demo
+            && !app.token_loading
+            && app.token_error.is_none()
+            && app.wallet().is_some()
+            && app
+                .token_updated
+                .is_none_or(|at| at.elapsed().as_secs() >= 15)
+        {
+            services.load_tokens(&mut app);
         }
         if redraw {
             terminal.draw(|frame| ui.draw(frame, &app))?;
@@ -302,6 +365,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
     }
     if action == Action::Activate {
         action = match app.pane {
+            Pane::Tokens => Action::SelectToken(app.token_cursor),
             Pane::Wallets => Action::SelectWallet(app.wallet_cursor),
             Pane::Wallet => Action::Inspect,
             Pane::Network => Action::Profiles,
@@ -345,6 +409,60 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         bail!("Wait for the current operation to finish");
     }
     match action {
+        Action::SelectToken(index) => {
+            app.token_cursor = index;
+            if let Some(account) = app.selected_token() {
+                app.modal = Some(Modal::Token {
+                    account: Box::new(account.clone()),
+                    scroll: 0,
+                });
+            }
+        }
+        Action::CopyToken(mint) | Action::ExplorerToken(mint) => {
+            let account = if let Some(Modal::Token { account, .. }) = &app.modal {
+                Some(account.as_ref())
+            } else {
+                app.selected_token()
+            }
+            .context("Select a token account first")?;
+            let address = if mint {
+                &account.mint
+            } else {
+                &account.address
+            }
+            .clone();
+            if matches!(action, Action::CopyToken(_)) {
+                copy(address.clone())?;
+                app.status = if mint {
+                    "Mint address copied"
+                } else {
+                    "Token account address copied"
+                }
+                .into();
+            } else {
+                let url = network::explorer_url(
+                    app.profile(),
+                    app.token_genesis.as_deref(),
+                    "address",
+                    &address,
+                )?;
+                services.jobs.spawn(async move {
+                    let _ = tokio::task::spawn_blocking(move || open::that(url)).await;
+                });
+            }
+        }
+        Action::ExportToken => {
+            app.token_export = Some(
+                if let Some(Modal::Token { account, .. }) = &app.modal {
+                    account.as_ref()
+                } else {
+                    app.selected_token()
+                        .context("Select a token account first")?
+                }
+                .clone(),
+            );
+            app.open_form(FormKind::TokenExport);
+        }
         Action::New => app.open_form(FormKind::New),
         Action::Import => app.open_form(FormKind::Import),
         Action::ImportTransaction => {
@@ -393,16 +511,21 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         }
         Action::AddProfile => app.open_form(FormKind::Profile),
         Action::Search => {
+            let tokens = app.view == crate::app::View::Tokens;
             let logs = app.view == crate::app::View::Logs;
-            if !logs {
+            if !logs && !tokens {
                 app.switch_view(crate::app::View::Activity);
             }
-            let value = if logs {
+            let value = if tokens {
+                app.token_filter.clone()
+            } else if logs {
                 app.log_filter.clone()
             } else {
                 app.filter.clone()
             };
-            app.open_form(if logs {
+            app.open_form(if tokens {
+                FormKind::TokenSearch
+            } else if logs {
                 FormKind::LogSearch
             } else {
                 FormKind::Search
@@ -497,6 +620,10 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             }
         }
         Action::Refresh => {
+            if app.view == crate::app::View::Tokens {
+                services.load_tokens(app);
+                return Ok(false);
+            }
             if matches!(app.refresh, RefreshState::Pending(_)) {
                 return Ok(false);
             }
@@ -664,15 +791,44 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
         return Ok(());
     }
     if let Some(Modal::Form(form)) = &app.modal
-        && matches!(form.kind, FormKind::Search | FormKind::LogSearch)
+        && matches!(
+            form.kind,
+            FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch
+        )
     {
-        if form.kind == FormKind::LogSearch {
+        if form.kind == FormKind::TokenSearch {
+            app.token_filter = form.fields[0].value.trim().to_owned();
+            app.token_cursor = 0;
+            app.focused_control = None;
+        } else if form.kind == FormKind::LogSearch {
             app.log_filter = form.fields[0].value.trim().to_owned();
             app.log_scroll = 0;
         } else {
             app.filter = form.fields[0].value.trim().to_owned();
         }
         app.transaction_cursor = 0;
+        app.modal = None;
+        return Ok(());
+    }
+    if let Some(Modal::Form(form)) = &app.modal
+        && form.kind == FormKind::TokenExport
+    {
+        let account = app
+            .token_export
+            .clone()
+            .context("No token account selected for export")?;
+        ensure_export_path(&form.fields[0].value)?;
+        let path = expand_path(&app.root, &PathBuf::from(form.fields[0].value.trim()));
+        let sender = services.local_sender.clone();
+        services.jobs.spawn(async move {
+            let result =
+                tokio::task::spawn_blocking(move || crate::tokens::export(&account, &path))
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .and_then(|v| v)
+                    .map(|_| "Token account exported as JSON".into());
+            let _ = sender.send(LocalEvent::Notice(result)).await;
+        });
         app.modal = None;
         return Ok(());
     }
@@ -829,11 +985,19 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
             services.save(app).await;
             services.restart(app);
         }
-        FormKind::Search | FormKind::LogSearch => {
+        FormKind::TokenExport => unreachable!(),
+        FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch => {
             app.filter = values[0].clone();
             app.transaction_cursor = 0;
             app.modal = None;
         }
+    }
+    Ok(())
+}
+
+fn ensure_export_path(value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("Choose an export path");
     }
     Ok(())
 }

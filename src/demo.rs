@@ -40,6 +40,23 @@ pub fn populate(app: &mut App) {
     });
     app.last_update = Some(Instant::now());
     let owner = app.wallets[0].address.clone();
+    app.tokens = (0..4).map(|i| {
+        let mint = Pubkey::new_from_array([30+i; 32]);
+        let program = if i == 2 { crate::tokens::TOKEN_2022 } else { crate::tokens::TOKEN_PROGRAM };
+        let address = if i == 3 { Pubkey::new_from_array([50; 32]) }
+            else { crate::tokens::associated_address(&owner.parse().unwrap(), &mint, &program.parse().unwrap()) };
+        let data = json!({"owner":program,"lamports":2039280,"space":165,"data":{"parsed":{"type":"account","info":{
+            "owner":owner,"mint":mint.to_string(),"state":if i==1 {"frozen"} else {"initialized"},"isNative":false,
+            "tokenAmount":{"amount":if i==3 {"0"} else {"125000000"},"decimals":6},
+            "extensions":if i==2 {json!([{"extension":"immutableOwner"}])} else {json!([])}
+        }}}});
+        let mut account = crate::tokens::decode(&address.to_string(), data, &owner.parse().unwrap(), 415239881).unwrap();
+        account.mint_info = Some(json!({"supply":"1000000000","decimals":6,"mintAuthority":owner,"freezeAuthority":null,
+            "extensions":[{"extension":"tokenMetadata","state":{"symbol":(["TEST","FROZEN","T22","EMPTY"][i as usize]),"name":"Demo token"}}]}));
+        account
+    }).collect();
+    app.token_genesis = Some(crate::network::DEVNET_GENESIS.into());
+    app.token_updated = Some(Instant::now());
     app.records = (0..9).map(|i| {
         let failed = i == 3 || i == 7;
         let signature = solana_signature::Signature::from([i as u8 + 3; 64]).to_string();

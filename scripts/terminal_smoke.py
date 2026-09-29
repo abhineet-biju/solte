@@ -102,7 +102,7 @@ def main():
             send(b"y")
             assert (root / ".solte/config.toml").read_text() == saved_selection, "Preview/copy must not activate a wallet"
             send(b"\x1b")
-            send(b"5j\r")
+            send(b"6j\r")
             assert b"Log details" in output
             send(b"y")
             send(b"\x1b")

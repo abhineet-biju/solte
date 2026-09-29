@@ -14,6 +14,10 @@ use crate::{
 
 impl Ui {
     pub(super) fn workspace(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
+        if app.view == View::Tokens {
+            self.tokens(frame, app, area, theme);
+            return;
+        }
         if app.view == View::Wallets && (area.width >= 80 || area.height >= 17) {
             let (list, details) = if area.width >= 80 {
                 let width = if area.width >= 100 { 34 } else { 32 };
@@ -398,6 +402,7 @@ mod tests {
                 .unwrap();
             let panels: Vec<_> = Pane::ALL
                 .into_iter()
+                .filter(|pane| *pane != Pane::Tokens)
                 .map(|pane| {
                     ui.hits
                         .iter()

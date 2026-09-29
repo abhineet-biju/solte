@@ -11,6 +11,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
+    Tokens,
     Wallets,
     Wallet,
     Network,
@@ -18,9 +19,16 @@ pub enum Pane {
 }
 
 impl Pane {
-    pub const ALL: [Self; 4] = [Self::Wallets, Self::Wallet, Self::Network, Self::Logs];
+    pub const ALL: [Self; 5] = [
+        Self::Wallets,
+        Self::Tokens,
+        Self::Wallet,
+        Self::Network,
+        Self::Logs,
+    ];
     pub fn name(self) -> &'static str {
         match self {
+            Self::Tokens => "Tokens",
             Self::Wallets => "Wallets",
             Self::Wallet => "Activity",
             Self::Network => "Network",
@@ -33,6 +41,7 @@ impl Pane {
 pub enum View {
     Overview,
     Wallets,
+    Tokens,
     #[value(name = "transactions", alias = "activity")]
     Activity,
     Network,
@@ -40,9 +49,10 @@ pub enum View {
 }
 
 impl View {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Overview,
         Self::Wallets,
+        Self::Tokens,
         Self::Activity,
         Self::Network,
         Self::Logs,
@@ -50,6 +60,7 @@ impl View {
     pub fn name(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
+            Self::Tokens => "Tokens",
             Self::Wallets => "Wallets",
             Self::Activity => "Transactions",
             Self::Network => "Network",
@@ -57,8 +68,14 @@ impl View {
         }
     }
     pub fn nav_label(self, width: u16) -> &'static str {
-        if self == Self::Activity && width < 68 {
-            "Txns"
+        if width < 80 {
+            match self {
+                Self::Overview => "Home",
+                Self::Wallets => "Keys",
+                Self::Activity => "Txns",
+                Self::Network => "RPC",
+                _ => self.name(),
+            }
         } else {
             self.name()
         }
@@ -67,6 +84,7 @@ impl View {
     pub fn pane(self) -> Pane {
         match self {
             Self::Overview | Self::Activity => Pane::Wallet,
+            Self::Tokens => Pane::Tokens,
             Self::Wallets => Pane::Wallets,
             Self::Network => Pane::Network,
             Self::Logs => Pane::Logs,
@@ -75,6 +93,7 @@ impl View {
     pub fn for_pane(pane: Pane) -> Self {
         match pane {
             Pane::Wallet => Self::Activity,
+            Pane::Tokens => Self::Tokens,
             Pane::Wallets => Self::Wallets,
             Pane::Network => Self::Network,
             Pane::Logs => Self::Logs,
@@ -100,6 +119,8 @@ pub enum FormKind {
     Profile,
     Search,
     LogSearch,
+    TokenSearch,
+    TokenExport,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +139,10 @@ pub enum Action {
     ActivateWallet(usize),
     CopyWallet(usize),
     SelectLog(usize),
+    SelectToken(usize),
+    CopyToken(bool),
+    ExplorerToken(bool),
+    ExportToken,
     CopyLog,
     SelectTransaction(usize),
     New,
@@ -254,6 +279,10 @@ impl Form {
                 Field::new("HTTP RPC endpoint", "http://127.0.0.1:8899"),
                 Field::new("WebSocket endpoint", "ws://127.0.0.1:8900"),
             ],
+            FormKind::TokenSearch => {
+                vec![Field::new("Mint, account, program, state or delegate", "")]
+            }
+            FormKind::TokenExport => vec![Field::new("JSON export path", "token-account.json")],
             FormKind::LogSearch => vec![Field::new("Message or level", "")],
             FormKind::Search => vec![Field::new("Signature, instruction, or error", "")],
         };
@@ -274,6 +303,8 @@ impl Form {
             FormKind::Profile => "Add RPC profile",
             FormKind::Search => "Filter transactions",
             FormKind::LogSearch => "Filter logs",
+            FormKind::TokenSearch => "Filter token accounts",
+            FormKind::TokenExport => "Export token account",
         }
     }
     pub fn submit_label(&self) -> &'static str {
@@ -283,7 +314,8 @@ impl Form {
             FormKind::Fund => "Request airdrop",
             FormKind::Transfer | FormKind::TransactionImport => "Simulate & review",
             FormKind::Profile => "Save profile",
-            FormKind::Search | FormKind::LogSearch => "Apply filter",
+            FormKind::TokenExport => "Export JSON",
+            FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch => "Apply filter",
         }
     }
     pub fn key(&mut self, key: KeyEvent) -> Option<Action> {
@@ -382,6 +414,10 @@ impl Appearance {
 }
 
 pub enum Modal {
+    Token {
+        account: Box<crate::tokens::TokenAccount>,
+        scroll: u16,
+    },
     Log {
         entry: LogEntry,
         scroll: u16,
@@ -434,9 +470,18 @@ pub struct App {
     pub wallet_cursor: usize,
     pub pane: Pane,
     pub view: View,
-    view_focus: [Option<(Pane, Option<Action>)>; 5],
+    view_focus: [Option<(Pane, Option<Action>)>; 6],
     pub focused_control: Option<Action>,
     pub selector_focus: bool,
+    pub tokens: Vec<crate::tokens::TokenAccount>,
+    pub token_cursor: usize,
+    pub token_export: Option<crate::tokens::TokenAccount>,
+    pub token_filter: String,
+    pub token_loading: bool,
+    pub token_updated: Option<Instant>,
+    pub token_error: Option<String>,
+    pub token_genesis: Option<String>,
+    pub token_warnings: Vec<String>,
     pub records: Vec<TransactionRecord>,
     pub transaction_cursor: usize,
     pub filter: String,
@@ -482,6 +527,15 @@ impl App {
             view_focus: std::array::from_fn(|_| None),
             focused_control: None,
             selector_focus: false,
+            tokens: vec![],
+            token_export: None,
+            token_cursor: 0,
+            token_filter: String::new(),
+            token_loading: false,
+            token_updated: None,
+            token_error: None,
+            token_genesis: None,
+            token_warnings: vec![],
             records: Vec::new(),
             transaction_cursor: 0,
             filter: String::new(),
@@ -582,6 +636,29 @@ impl App {
     }
     pub fn profile(&self) -> &RpcProfile {
         &self.config.profiles[self.config.selected_profile]
+    }
+    pub fn visible_tokens(&self) -> Vec<&crate::tokens::TokenAccount> {
+        let query = self.token_filter.to_lowercase();
+        self.tokens
+            .iter()
+            .filter(|a| {
+                query.is_empty()
+                    || format!(
+                        "{} {} {} {} {} {}",
+                        a.address,
+                        a.mint,
+                        a.label(),
+                        a.program_label(),
+                        a.state,
+                        a.info()["delegate"]
+                    )
+                    .to_lowercase()
+                    .contains(&query)
+            })
+            .collect()
+    }
+    pub fn selected_token(&self) -> Option<&crate::tokens::TokenAccount> {
+        self.visible_tokens().get(self.token_cursor).copied()
     }
     pub fn visible_records(&self) -> Vec<&TransactionRecord> {
         let filter = self.filter.to_lowercase();
@@ -749,7 +826,23 @@ impl App {
                 KeyCode::Char('3') if matches!(modal, Modal::Funding { .. }) => {
                     Some(Action::RpcAirdrop)
                 }
+                KeyCode::Char('y') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::CopyToken(false))
+                }
+                KeyCode::Char('M') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::CopyToken(true))
+                }
+                KeyCode::Char('o') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::ExplorerToken(false))
+                }
+                KeyCode::Char('O') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::ExplorerToken(true))
+                }
+                KeyCode::Char('E') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::ExportToken)
+                }
                 KeyCode::Esc | KeyCode::Char('q') => Some(Action::Close),
+                KeyCode::Enter if matches!(modal, Modal::Token { .. }) => Some(Action::Close),
                 KeyCode::Enter => Some(Action::Submit),
                 KeyCode::Char('j' | 'J') | KeyCode::Down => Some(Action::Scroll(1)),
                 KeyCode::Char('k' | 'K') | KeyCode::Up => Some(Action::Scroll(-1)),
@@ -775,9 +868,10 @@ impl App {
             KeyCode::BackTab => Some(Action::CycleFocus(false)),
             KeyCode::Char('1') => Some(Action::Selector(View::Overview)),
             KeyCode::Char('2') => Some(Action::Selector(View::Wallets)),
-            KeyCode::Char('3') => Some(Action::Selector(View::Activity)),
-            KeyCode::Char('4') => Some(Action::Selector(View::Network)),
-            KeyCode::Char('5') => Some(Action::Selector(View::Logs)),
+            KeyCode::Char('3') => Some(Action::Selector(View::Tokens)),
+            KeyCode::Char('4') => Some(Action::Selector(View::Activity)),
+            KeyCode::Char('5') => Some(Action::Selector(View::Network)),
+            KeyCode::Char('6') => Some(Action::Selector(View::Logs)),
             KeyCode::Down | KeyCode::Char('j' | 'J') => Some(Action::Navigate(Direction::Down)),
             KeyCode::Up | KeyCode::Char('k' | 'K') => Some(Action::Navigate(Direction::Up)),
             KeyCode::PageDown => Some(Action::Move(10)),
@@ -800,7 +894,12 @@ impl App {
             KeyCode::Char('r' | 'R') => Some(Action::Refresh),
             KeyCode::Char('t') => Some(Action::Theme),
             KeyCode::Char('m') => Some(Action::Motion),
+            KeyCode::Char('o') if self.view == View::Tokens => Some(Action::ExplorerToken(false)),
             KeyCode::Char('o') => Some(Action::ExplorerTransaction),
+            KeyCode::Char('y') if self.view == View::Tokens => Some(Action::CopyToken(false)),
+            KeyCode::Char('M') if self.view == View::Tokens => Some(Action::CopyToken(true)),
+            KeyCode::Char('O') if self.view == View::Tokens => Some(Action::ExplorerToken(true)),
+            KeyCode::Char('E') if self.view == View::Tokens => Some(Action::ExportToken),
             KeyCode::Char('y') if self.view == View::Wallets => {
                 Some(Action::CopyWallet(self.wallet_cursor))
             }
@@ -822,6 +921,9 @@ impl App {
     pub fn navigate(&mut self, action: &Action) -> bool {
         match *action {
             Action::Focus(pane) => {
+                if pane == Pane::Tokens || self.view != View::Overview {
+                    self.switch_view(View::for_pane(pane));
+                }
                 self.selector_focus = false;
                 if self.pane != pane {
                     self.focused_control = None;
@@ -833,6 +935,11 @@ impl App {
                 self.selector_focus = true;
             }
             Action::Move(delta) => match self.pane {
+                Pane::Tokens => {
+                    self.token_cursor =
+                        move_index(self.token_cursor, delta, self.visible_tokens().len());
+                    self.focused_control = Some(Action::SelectToken(self.token_cursor));
+                }
                 Pane::Wallets => {
                     self.wallet_cursor = move_index(self.wallet_cursor, delta, self.wallets.len());
                     self.focused_control = Some(Action::SelectWallet(self.wallet_cursor));
@@ -865,7 +972,8 @@ impl App {
                     *selected = move_index(*selected, delta, self.config.profiles.len())
                 }
                 Some(
-                    Modal::Log { scroll, .. }
+                    Modal::Token { scroll, .. }
+                    | Modal::Log { scroll, .. }
                     | Modal::Wallet { scroll, .. }
                     | Modal::Inspect { scroll, .. }
                     | Modal::Review { scroll, .. }
@@ -917,7 +1025,10 @@ impl App {
                 self.status = "Visible session log cleared".into();
             }
             Action::ClearFilter => {
-                if self.view == View::Logs {
+                if self.view == View::Tokens {
+                    self.token_filter.clear();
+                    self.token_cursor = 0;
+                } else if self.view == View::Logs {
                     self.log_filter.clear();
                     self.log_scroll = 0;
                 } else {

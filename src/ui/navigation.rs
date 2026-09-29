@@ -31,6 +31,7 @@ impl Ui {
         }
         let controls = self.controls(app.pane);
         let default = match app.pane {
+            Pane::Tokens => Action::SelectToken(app.token_cursor),
             Pane::Wallets if !app.wallets.is_empty() => Action::SelectWallet(app.wallet_cursor),
             Pane::Wallets => Action::New,
             Pane::Wallet => Action::Fund,
@@ -117,6 +118,13 @@ impl Ui {
             _ => 0,
         };
         if delta != 0 {
+            if let Action::SelectToken(index) = current {
+                let next = index as i64 + delta;
+                if (0..app.visible_tokens().len() as i64).contains(&next) {
+                    Self::focus(app, Action::SelectToken(next as usize));
+                    return;
+                }
+            }
             if let Action::SelectLog(index) = current {
                 let next = index as i64 + delta;
                 if (0..app.visible_logs().len() as i64).contains(&next) {
@@ -170,6 +178,7 @@ impl Ui {
         match action {
             Action::SelectLog(index) => app.focus_log(index),
             Action::SelectWallet(index) => app.wallet_cursor = index,
+            Action::SelectToken(index) => app.token_cursor = index,
             Action::SelectTransaction(index) => app.transaction_cursor = index,
             _ => {}
         }

@@ -2,6 +2,7 @@ mod layout;
 mod navigation;
 mod short;
 pub mod theme;
+mod tokens;
 
 use std::{fmt::Write, path::Path, time::Instant};
 
@@ -77,7 +78,8 @@ impl Ui {
         }
         app.modal_scroll_limit = self.modal_scroll_limit;
         if let Some(
-            Modal::Log { scroll, .. }
+            Modal::Token { scroll, .. }
+            | Modal::Log { scroll, .. }
             | Modal::Wallet { scroll, .. }
             | Modal::Inspect { scroll, .. }
             | Modal::Review { scroll, .. }
@@ -409,6 +411,7 @@ impl Ui {
 
     fn draw_pane(&mut self, frame: &mut Frame, app: &App, area: Rect, pane: Pane, theme: Theme) {
         match pane {
+            Pane::Tokens => self.tokens(frame, app, area, theme),
             Pane::Wallets => self.wallets(frame, app, area, theme),
             Pane::Wallet => self.wallet(frame, app, area, theme),
             Pane::Network => self.network(frame, app, area, theme),
@@ -1255,6 +1258,7 @@ impl Ui {
             Modal::Funding { .. } => "Fund Devnet wallet",
             Modal::Form(form) => form.title(),
             Modal::Profiles { .. } => "RPC profiles",
+            Modal::Token { .. } => "Token account inspector",
             Modal::Log { .. } => "Log details",
             Modal::Wallet { .. } => "Wallet details",
             Modal::Inspect { .. } => "Transaction inspector",
@@ -1277,6 +1281,21 @@ impl Ui {
         frame.render_widget(block, area);
         self.target(Rect::new(area.right() - 10, area.y, 9, 1), Action::Close);
         match modal {
+            Modal::Token { account, scroll } => {
+                self.inspection_body(frame, inner, account.lines(), *scroll, theme);
+                let actions = [
+                    ("Copy [y]", Action::CopyToken(false)),
+                    ("Mint [M]", Action::CopyToken(true)),
+                    ("JSON [E]", Action::ExportToken),
+                    ("Explorer [o]", Action::ExplorerToken(false)),
+                ];
+                self.token_buttons(
+                    frame,
+                    Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+                    &actions,
+                    theme,
+                );
+            }
             Modal::Appearance { kind, selected } => {
                 for (index, (id, label)) in kind.choices().iter().enumerate() {
                     let palette = if *kind == Appearance::Theme {
@@ -1451,6 +1470,8 @@ impl Ui {
                     crate::app::FormKind::Profile => {
                         "Profiles are stored locally in .solte/config.toml."
                     }
+                    crate::app::FormKind::TokenExport => "Exports public account data only. Existing files are never overwritten.",
+                    crate::app::FormKind::TokenSearch => "Search mint, account, program, state, or delegate. Empty clears the filter.",
                     crate::app::FormKind::Search | crate::app::FormKind::LogSearch => {
                         "Leave empty to show all captured transactions."
                     }
@@ -1724,8 +1745,8 @@ impl Ui {
                 let lines = [
                     "NAVIGATION",
                     "[Tab]/[Shift-Tab]  Move focus within this view",
-                    "[1] Overview   [2] Wallets   [3] Transactions",
-                    "[4] Network    [5] Logs",
+                    "[1] Overview   [2] Wallets   [3] Tokens",
+                    "[4] Transactions   [5] Network   [6] Logs",
                     "[←]/[→]  Switch main views outside dialogs",
                     "[h][j][k][l] or [↑]/[↓]  Navigate inside a pane",
                     "[k] at the top focuses the main tab bar",
@@ -1747,6 +1768,14 @@ impl Ui {
                     "[p] RPC profiles      [r]/[R] Refresh state",
                     "Refresh shows progress, then success or failure.",
                     "Offline refresh reloads cached history only.",
+                    "",
+                    "TOKENS",
+                    "[Enter]/click  Inspect a token account; [j]/[k] selects rows",
+                    "[y] Copy account   [M] Copy mint   [E] Export JSON",
+                    "[o] Account Explorer   [O] Mint Explorer",
+                    "[/] Filter by mint/account/program/state/delegate; [x] clears",
+                    "[r] Refresh selected wallet's token accounts",
+                    "Token amounts use exact integers; empty accounts remain visible.",
                     "",
                     "TRANSACTIONS AND LOGS",
                     "[/] Search this view   [x] Clear its search",
