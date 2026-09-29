@@ -1,6 +1,6 @@
 # Solte
 
-Solte is a developer-first, TUI-based Solana wallet built for the terminal.
+Solte is a terminal-based Solana wallet built for developers.
 
 > **Development use only.** Solte has not been thoroughly security-tested or independently audited for use with real mainnet funds. It is intended for development and testing. Do not use it to store or manage real funds.
 
