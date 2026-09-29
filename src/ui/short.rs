@@ -68,7 +68,7 @@ impl Ui {
                 theme,
                 app.view == *view,
             );
-            x += width + 1;
+            x += width + if area.width >= 80 { 2 } else { 1 };
         }
         let body = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
         self.workspace(frame, app, body, theme);
@@ -202,7 +202,7 @@ impl Ui {
             if app.view == View::Activity {
                 "Transactions"
             } else {
-                "Wallet activity"
+                "Activity"
             },
             theme,
         );
@@ -211,18 +211,36 @@ impl Ui {
             return;
         };
         let balance = app.balance.map(format_sol).unwrap_or_else(|| "—".into());
-        frame.render_widget(
-            Paragraph::new(format!(
-                " {} · {balance} SOL{} · {}",
-                clean_text(&wallet.name),
-                if !app.connected { " · stale" } else { "" },
-                short(&wallet.address)
-            ))
-            .style(Style::default().fg(theme.green)),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
+        let summary = app.view == View::Overview && inner.height >= 7;
+        let header_rows = if summary { 2 } else { 1 };
+        if summary {
+            frame.render_widget(
+                Paragraph::new(format!(
+                    " {balance} SOL{}",
+                    if !app.connected { " · stale" } else { "" }
+                ))
+                .style(Style::default().fg(theme.green).bold()),
+                Rect::new(inner.x, inner.y, inner.width, 1),
+            );
+            frame.render_widget(
+                Paragraph::new(format!(" {}", short(&wallet.address)))
+                    .style(Style::default().fg(theme.muted)),
+                Rect::new(inner.x, inner.y + 1, inner.width, 1),
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(format!(
+                    " {} · {balance} SOL{} · {}",
+                    clean_text(&wallet.name),
+                    if !app.connected { " · stale" } else { "" },
+                    short(&wallet.address)
+                ))
+                .style(Style::default().fg(theme.green)),
+                Rect::new(inner.x, inner.y, inner.width, 1),
+            );
+        }
         let mut x = inner.x;
-        let mut toolbar_y = inner.y + 1;
+        let mut toolbar_y = inner.y + header_rows;
         let actions = [
             ("Fund [f]", Action::Fund),
             ("Send [s]", Action::Send),
@@ -289,7 +307,9 @@ impl Ui {
                     if record.error.is_some() { "×" } else { "✓" },
                     short(&record.signature),
                     record.activity(app.wallet().map(|w| w.address.as_str()).unwrap_or_default()),
-                    if inner.width >= 52 {
+                    if app.view == View::Overview {
+                        String::new()
+                    } else if inner.width >= 52 {
                         format!("  slot {}", record.slot)
                     } else if inner.width >= 44 {
                         format!("  {}", record.slot)

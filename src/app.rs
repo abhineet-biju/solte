@@ -68,6 +68,9 @@ impl View {
         }
     }
     pub fn nav_label(self, width: u16) -> &'static str {
+        if self == Self::Activity && width < 110 {
+            return "Txns";
+        }
         if width < 80 {
             match self {
                 Self::Overview => "Home",

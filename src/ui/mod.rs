@@ -386,7 +386,7 @@ impl Ui {
                 theme,
                 app.view == *view,
             );
-            x += width + 1;
+            x += width + 2;
         }
         if app.view != View::Overview && area.width > 84 {
             let mut name = clean_text(&app.profile().name);
@@ -507,10 +507,13 @@ impl Ui {
     }
 
     fn wallet(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
-        let title = app
-            .wallet()
-            .map(|w| format!("Transactions · {}", clean_text(&w.name)))
-            .unwrap_or_else(|| "Wallet overview".into());
+        let title = if app.view == View::Overview {
+            "Activity".into()
+        } else {
+            app.wallet()
+                .map(|w| format!("Transactions · {}", clean_text(&w.name)))
+                .unwrap_or_else(|| "Wallet overview".into())
+        };
         let inner = self.panel(frame, app, area, Pane::Wallet, &title, theme);
         let inner = inner.inner(ratatui::layout::Margin::new(1, 0));
         if inner.height < 5 {
@@ -1022,8 +1025,13 @@ impl Ui {
     }
 
     fn logs(&mut self, frame: &mut Frame, app: &App, area: Rect, theme: Theme) {
+        let title = if app.view == View::Overview {
+            "Logs · UTC"
+        } else {
+            "Logs"
+        };
         let inner = self
-            .panel(frame, app, area, Pane::Logs, "Logs", theme)
+            .panel(frame, app, area, Pane::Logs, title, theme)
             .inner(ratatui::layout::Margin::new(1, 0));
         if area.width > 44 {
             self.border_button(
@@ -1131,10 +1139,15 @@ impl Ui {
             let y = inner.y + row as u16 * row_height;
             let seconds = entry.timestamp % 86_400;
             let time = format!(
-                "{:02}:{:02}:{:02} UTC",
+                "{:02}:{:02}:{:02}{}",
                 seconds / 3600,
                 seconds / 60 % 60,
-                seconds % 60
+                seconds % 60,
+                if app.view == View::Overview {
+                    ""
+                } else {
+                    " UTC"
+                }
             );
             let color = theme.log_color(&entry.level);
             let rect = Rect::new(inner.x, y, inner.width, if detailed { 2 } else { 1 });
@@ -1152,7 +1165,11 @@ impl Ui {
                             "[Enter] details".into()
                         }
                     } else {
-                        clean_text(&entry.message).replace('\n', " · ")
+                        if app.view == View::Overview {
+                            fit_summary(&entry.preview(), inner.width.saturating_sub(17))
+                        } else {
+                            clean_text(&entry.message).replace('\n', " · ")
+                        }
                     },
                     Style::default().fg(if detailed { theme.muted } else { color }),
                 ),
@@ -1894,6 +1911,25 @@ impl Ui {
             );
         }
     }
+}
+
+fn fit_summary(text: &str, width: u16) -> String {
+    if Line::from(text).width() <= usize::from(width) {
+        return text.into();
+    }
+    let mut result = String::new();
+    let mut columns = 0;
+    for character in text.chars() {
+        columns += Line::from(character.to_string()).width();
+        if columns > usize::from(width.saturating_sub(1)) {
+            break;
+        }
+        result.push(character);
+    }
+    if width > 0 {
+        result.push('…');
+    }
+    result
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {

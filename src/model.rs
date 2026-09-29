@@ -170,6 +170,16 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
+    pub fn preview(&self) -> String {
+        let mut text = clean_text(&self.message).replace('\n', " · ");
+        for value in self.message.split(|c: char| !c.is_ascii_alphanumeric()) {
+            if value.parse::<solana_signature::Signature>().is_ok() {
+                text = text.replace(value, &short(value));
+            }
+        }
+        text
+    }
+
     pub fn signature(&self) -> Option<String> {
         self.message
             .split(|c: char| !c.is_ascii_alphanumeric())

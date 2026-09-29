@@ -259,7 +259,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                             app.token_genesis = None; app.token_error = None; app.token_warnings.clear();
                         }
                         if !matches!(app.refresh, RefreshState::Pending(_)) {
-                            app.status = format!("{} · confirmed activity · captured history stored locally", network.cluster);
+                            app.status = format!("{} · {}", network.cluster, if network.healthy { "connected" } else { "RPC health warning" });
                         }
                         app.network = Some(network); app.balance = balance; app.connected = true; app.last_update = Some(Instant::now());
                     },

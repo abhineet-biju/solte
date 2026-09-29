@@ -169,16 +169,6 @@ impl Ui {
                     .style(Style::default().fg(theme.border)),
                 Rect::new(inner.x, content.bottom(), inner.width, 1),
             );
-            frame.render_widget(
-                Paragraph::new("─".repeat(inner.width.saturating_sub(2) as usize))
-                    .style(Style::default().fg(theme.border)),
-                Rect::new(
-                    inner.x + 1,
-                    inner.bottom() - 2,
-                    inner.width.saturating_sub(2),
-                    1,
-                ),
-            );
         }
     }
 

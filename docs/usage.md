@@ -198,3 +198,5 @@ cargo test --test localnet -- --ignored
 python3 scripts/terminal_smoke.py --binary target/release/solte --format v1 \
   --local-rpc http://127.0.0.1:18899 --local-ws ws://127.0.0.1:18900
 ```
+
+Overview keeps the same left-wallet, center-activity, right-network and bottom-log arrangement. Compact summaries separate balance from address, omit activity slot numbers, and abbreviate signatures in logs. Open a transaction or log entry to inspect and copy the original full values. Tabs use shorter labels where needed to preserve spacing.
