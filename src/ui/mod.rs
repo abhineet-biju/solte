@@ -296,7 +296,7 @@ impl Ui {
             self.short_layout(frame, app, area, theme);
         } else {
             let outer = Layout::vertical([
-                Constraint::Length(4),
+                Constraint::Length(5),
                 Constraint::Min(5),
                 Constraint::Length(3),
             ])

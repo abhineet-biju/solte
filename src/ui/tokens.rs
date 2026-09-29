@@ -20,9 +20,17 @@ impl Ui {
         actions: &[(&str, Action)],
         theme: Theme,
     ) {
+        let labels_width = actions
+            .iter()
+            .map(|(label, _)| label.len() as u16)
+            .sum::<u16>();
+        let gaps = actions.len().saturating_sub(1) as u16;
+        let spacious = labels_width + 2 * actions.len() as u16 + 3 * gaps <= area.width;
+        let padding = if spacious { 2 } else { 0 };
+        let gap = if spacious { 3 } else { 2 };
         let mut x = area.x;
         for (label, action) in actions {
-            let width = label.len() as u16;
+            let width = label.len() as u16 + padding;
             if x + width > area.right() {
                 break;
             }
@@ -34,7 +42,7 @@ impl Ui {
                 theme,
                 false,
             );
-            x += width + 1;
+            x += width + gap;
         }
     }
 
@@ -78,8 +86,14 @@ impl Ui {
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
         let roomy = inner.height >= 9;
+        let selected = app.selected_token().is_some();
+        let reserved = if roomy {
+            if selected { 5 } else { 3 }
+        } else {
+            1
+        };
         let body_y = inner.y + if roomy { 3 } else { 1 };
-        let body_bottom = inner.bottom() - if roomy { 4 } else { 1 };
+        let body_bottom = inner.bottom() - reserved;
         let split = inner.width >= 104 && roomy;
         let list_width = if split {
             inner.width * 55 / 100
@@ -117,7 +131,7 @@ impl Ui {
             } else if !app.token_filter.is_empty() {
                 "No matching accounts. [x] clears the filter."
             } else if app.token_updated.is_some() || app.demo {
-                "No owned token accounts found. Empty token accounts are included."
+                "No token accounts yet.\n\nCreate an account for an existing mint with [a]."
             } else {
                 "Token account discovery has not completed."
             };
@@ -212,30 +226,53 @@ impl Ui {
                 );
             }
         }
-        let actions = [
-            ("Inspect [Enter]", Action::SelectToken(app.token_cursor)),
-            ("Copy [y]", Action::CopyToken(false)),
-            ("Mint [M]", Action::CopyToken(true)),
-            ("JSON [E]", Action::ExportToken),
-            ("Explorer [o]", Action::ExplorerToken(false)),
-        ];
         if roomy {
-            self.token_buttons(
-                frame,
-                Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
-                &actions,
-                theme,
+            frame.render_widget(
+                Paragraph::new("─".repeat(inner.width as usize))
+                    .style(Style::default().fg(theme.border)),
+                Rect::new(inner.x, body_bottom, inner.width, 1),
             );
+            if selected {
+                self.token_buttons(
+                    frame,
+                    Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
+                    &[
+                        ("Inspect [Enter]", Action::SelectToken(app.token_cursor)),
+                        ("Send [s]", Action::Send),
+                    ],
+                    theme,
+                );
+            }
+        }
+        let mut tools = Vec::new();
+        if !app.tokens.is_empty() || !app.token_filter.is_empty() {
+            tools.push(if app.token_filter.is_empty() {
+                ("Find [/]", Action::Search)
+            } else {
+                ("Clear [x]", Action::ClearFilter)
+            });
+        }
+        tools.push(("Refresh [r]", Action::Refresh));
+        let tools_width = tools
+            .iter()
+            .map(|(label, _)| label.len() as u16 + 2)
+            .sum::<u16>()
+            + 3 * tools.len().saturating_sub(1) as u16;
+        let y = inner.bottom() - 1;
+        let mut primary = vec![("Create ATA [a]", Action::CreateTokenAccount)];
+        if !roomy && selected {
+            primary.push(("Send [s]", Action::Send));
         }
         self.token_buttons(
             frame,
-            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-            &[
-                ("Find [/]", Action::Search),
-                ("Send [s]", Action::Send),
-                ("Create ATA [a]", Action::CreateTokenAccount),
-                ("Refresh [r]", Action::Refresh),
-            ],
+            Rect::new(inner.x, y, inner.width - tools_width - 2, 1),
+            &primary,
+            theme,
+        );
+        self.token_buttons(
+            frame,
+            Rect::new(inner.right() - tools_width, y, tools_width, 1),
+            &tools,
             theme,
         );
     }

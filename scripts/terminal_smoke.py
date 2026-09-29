@@ -91,7 +91,7 @@ def main():
             assert len(json.loads(buyer.read_text())) == 64
             assert buyer.stat().st_mode & 0o777 == 0o600
 
-            send(b"\x1b[<0;4;28M")
+            send(b"\x1b[<0;4;29M")
             send(b"\x15seller\r")
             seller = root / ".solte/keys/seller.json"
             wait_for(seller.exists)

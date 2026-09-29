@@ -70,7 +70,8 @@ impl Ui {
             );
             x += width + if area.width >= 80 { 2 } else { 1 };
         }
-        let body = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
+        let gap = u16::from(area.height >= 15);
+        let body = Rect::new(area.x, area.y + 2 + gap, area.width, area.height - 3 - gap);
         self.workspace(frame, app, body, theme);
         let y = area.bottom() - 1;
         let message = app.busy.as_ref().unwrap_or(&app.status);

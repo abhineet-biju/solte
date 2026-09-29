@@ -91,7 +91,7 @@ def main():
             assert b"Create associated token account" in output
             send(b"\x1b")
             send(b"x")
-            send(b"\x1b[<0;4;9M")
+            send(b"\x1b[<0;4;10M")
             assert b"Token account inspector" in output, "Mouse row selection should open the same inspector"
             send(b"\x1b")
             send(b"q")

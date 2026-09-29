@@ -56,7 +56,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 
 ## Token accounts
 
-Open **Tokens [3]** or launch with `solte --view tokens`. The view discovers owned accounts from SPL Token and Token-2022, including empty accounts and multiple accounts for the same mint. It identifies associated accounts and custom accounts. Frozen accounts appear in red; balances use exact raw integers and mint decimals.
+Open **Tokens [3]** or launch with `solte --view tokens`. The action area separates inspection/sending from account creation and browsing tools. Copy, mint, JSON export and Explorer buttons are in the account inspector; their keyboard shortcuts also work from the list. The view discovers owned accounts from SPL Token and Token-2022, including empty accounts and multiple accounts for the same mint. It identifies associated accounts and custom accounts. Frozen accounts appear in red; balances use exact raw integers and mint decimals.
 
 Use `j`/`k`, Page Up/Down, or the mouse to select accounts. Wide windows show a details preview. Enter or clicking a row opens the full scrollable inspector at every size. It shows account/mint/program addresses, raw balance, decimals, account state, lamports, authorities, delegates, mint supply and decoded extensions. Token-2022 display adjustments are shown as extensions; the numeric balance is the base amount derived from raw units.
 
