@@ -4,6 +4,7 @@ pub mod config;
 pub mod demo;
 pub mod funding;
 mod keyfile;
+pub mod mints;
 pub mod model;
 pub mod network;
 pub mod operations;

@@ -22,6 +22,9 @@ use crate::{
 };
 
 pub struct PreparedTransfer {
+    pub extra_wallets: Vec<Wallet>,
+    pub mint_signer: Option<solana_keypair::Keypair>,
+    pub created_mint: Option<crate::mints::MintRecord>,
     pub summary: Vec<String>,
     pub transaction: VersionedTransaction,
     pub accounts: Vec<Pubkey>,
@@ -187,6 +190,9 @@ pub(crate) async fn inspect(
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| anyhow::anyhow!("Fee unavailable; blockhash may have expired"))?;
     Ok(PreparedTransfer {
+        extra_wallets: vec![],
+        mint_signer: None,
+        created_mint: None,
         summary: vec![],
         transaction,
         accounts,
@@ -272,12 +278,17 @@ pub async fn submit(
     let result = async {
         validate_review(&prepared).await?;
         crate::transaction::sign(&mut prepared.transaction, &prepared.wallet)?;
+        sign_mint(&mut prepared)?;
         if prepared.transaction.signatures.iter().any(|s| *s == Signature::default()) {
             bail!("Additional signatures are required. Import again with an export path to save a partially signed transaction.");
         }
         prepared.transaction.verify_and_hash_message().map_err(|_| anyhow::anyhow!("Signature verification failed"))?;
         let rpc = client(&profile);
         let signature = prepared.transaction.signatures[0];
+        if let Some(mut record) = prepared.created_mint.take() {
+            record.signature = signature.to_string();
+            store.save_mint(&profile.http, &prepared.genesis, record).await?;
+        }
         persist(
             &store,
             &scope,
@@ -370,6 +381,26 @@ pub async fn fund(
         return;
     }
     finish(result, session, &store, &scope, &profile, &sender).await;
+}
+
+fn sign_mint(prepared: &mut PreparedTransfer) -> Result<()> {
+    use solana_signer::Signer;
+    for wallet in prepared.extra_wallets.drain(..) {
+        crate::transaction::sign(&mut prepared.transaction, &wallet)?;
+    }
+    if let Some(signer) = prepared.mint_signer.take() {
+        let index = prepared
+            .transaction
+            .message
+            .static_account_keys()
+            .iter()
+            .take(prepared.transaction.signatures.len())
+            .position(|key| *key == signer.pubkey())
+            .ok_or_else(|| anyhow::anyhow!("Mint is not a required signer"))?;
+        prepared.transaction.signatures[index] =
+            signer.try_sign_message(&prepared.transaction.message.serialize())?;
+    }
+    Ok(())
 }
 
 async fn confirm(rpc: &RpcClient, signature: &Signature) -> Result<()> {

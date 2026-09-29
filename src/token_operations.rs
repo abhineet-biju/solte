@@ -28,7 +28,7 @@ async fn parsed_account(rpc: &RpcClient, address: &Pubkey) -> Result<Value> {
     Ok(response["value"].clone())
 }
 
-async fn mint_info(rpc: &RpcClient, address: &Pubkey) -> Result<(Pubkey, Value)> {
+pub(crate) async fn mint_info(rpc: &RpcClient, address: &Pubkey) -> Result<(Pubkey, Value)> {
     let account = parsed_account(rpc, address).await?;
     let program: Pubkey = account["owner"]
         .as_str()
@@ -241,7 +241,7 @@ pub async fn prepare_transfer(
     Ok(prepared)
 }
 
-async fn prepare(
+pub(crate) async fn prepare(
     profile: &RpcProfile,
     wallet: &Wallet,
     rpc: &RpcClient,

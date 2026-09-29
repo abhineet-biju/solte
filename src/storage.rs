@@ -13,6 +13,8 @@ use crate::{
 type Reply<T> = oneshot::Sender<Result<T>>;
 
 enum Request {
+    SaveMint(String, String, crate::mints::MintRecord, Reply<()>),
+    Mints(String, String, Reply<Vec<crate::mints::MintRecord>>),
     Config(std::path::PathBuf, crate::config::Config, Reply<()>),
     Load(String, usize, Reply<Vec<TransactionRecord>>),
     Cursors(String, Reply<HashMap<String, String>>),
@@ -44,6 +46,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS transactions(scope TEXT NOT NULL, chain TEXT NOT NULL, signature TEXT NOT NULL, slot INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope, chain, signature));
             CREATE INDEX IF NOT EXISTS transaction_order ON transactions(scope, chain, slot DESC);
             CREATE TABLE IF NOT EXISTS cursors(scope TEXT NOT NULL, chain TEXT NOT NULL, address TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY(scope, chain, address));
+            CREATE TABLE IF NOT EXISTS mints(endpoint TEXT NOT NULL, chain TEXT NOT NULL, address TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(endpoint, chain, address));
             CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL);")?;
         let (sender, mut receiver) = mpsc::channel(128);
         std::thread::Builder::new()
@@ -52,6 +55,21 @@ impl Store {
                 let mut conn = conn;
                 while let Some(request) = receiver.blocking_recv() {
                     match request {
+                        Request::SaveMint(endpoint, chain, record, reply) => {
+                            let result = (|| -> Result<()> {
+                                conn.execute("INSERT INTO mints(endpoint,chain,address,payload) VALUES(?1,?2,?3,?4) ON CONFLICT(endpoint,chain,address) DO UPDATE SET payload=excluded.payload", params![endpoint, chain, record.address, serde_json::to_string(&record)?])?;
+                                Ok(())
+                            })();
+                            let _ = reply.send(result);
+                        }
+                        Request::Mints(endpoint, chain, reply) => {
+                            let result = (|| -> Result<Vec<crate::mints::MintRecord>> {
+                                let mut stmt = conn.prepare("SELECT payload FROM mints WHERE endpoint=?1 AND chain=?2 ORDER BY rowid DESC")?;
+                                stmt.query_map(params![endpoint, chain], |row| row.get::<_, String>(0))?
+                                    .map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+                            })();
+                            let _ = reply.send(result);
+                        }
                         Request::Config(root, config, reply) => {
                             let _ = reply.send(config.save(&root));
                         }
@@ -77,6 +95,36 @@ impl Store {
                 }
             })?;
         Ok(Self { sender })
+    }
+
+    pub async fn save_mint(
+        &self,
+        endpoint: &str,
+        chain: &str,
+        record: crate::mints::MintRecord,
+    ) -> Result<()> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::SaveMint(
+                scope(endpoint, "mints"),
+                chain.into(),
+                record,
+                send,
+            ))
+            .await?;
+        receive.await?
+    }
+
+    pub async fn mints(
+        &self,
+        endpoint: &str,
+        chain: &str,
+    ) -> Result<Vec<crate::mints::MintRecord>> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::Mints(scope(endpoint, "mints"), chain.into(), send))
+            .await?;
+        receive.await?
     }
 
     pub async fn config(&self, root: &Path, config: crate::config::Config) -> Result<()> {
