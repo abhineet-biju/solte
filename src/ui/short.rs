@@ -68,7 +68,7 @@ impl Ui {
                 theme,
                 app.view == *view,
             );
-            x += width + if area.width >= 80 { 2 } else { 1 };
+            x += width + 1;
         }
         let gap = u16::from(area.height >= 15);
         let body = Rect::new(area.x, area.y + 2 + gap, area.width, area.height - 3 - gap);

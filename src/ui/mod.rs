@@ -386,7 +386,7 @@ impl Ui {
                 theme,
                 app.view == *view,
             );
-            x += width + 2;
+            x += width + 1;
         }
         if app.view != View::Overview && area.width > 84 {
             let mut name = clean_text(&app.profile().name);
