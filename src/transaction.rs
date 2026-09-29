@@ -56,21 +56,30 @@ pub fn transfer(
     let instructions = [solana_system_interface::instruction::transfer(
         sender, recipient, amount,
     )];
+    build(format, sender, &instructions, blockhash)
+}
+
+pub fn build(
+    format: Format,
+    sender: &Pubkey,
+    instructions: &[solana_instruction::Instruction],
+    blockhash: Hash,
+) -> Result<VersionedTransaction> {
     let message = match format {
         Format::Auto | Format::Legacy => VersionedMessage::Legacy(Message::new_with_blockhash(
-            &instructions,
+            instructions,
             Some(sender),
             &blockhash,
         )),
         Format::V0 => VersionedMessage::V0(v0::Message::try_compile(
             sender,
-            &instructions,
+            instructions,
             &[],
             blockhash,
         )?),
         Format::V1 => VersionedMessage::V1(v1::Message::try_compile_with_config(
             sender,
-            &instructions,
+            instructions,
             blockhash,
             v1::TransactionConfig::default()
                 .with_compute_unit_limit(1_400_000)

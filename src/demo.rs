@@ -51,7 +51,7 @@ pub fn populate(app: &mut App) {
             "extensions":if i==2 {json!([{"extension":"immutableOwner"}])} else {json!([])}
         }}}});
         let mut account = crate::tokens::decode(&address.to_string(), data, &owner.parse().unwrap(), 415239881).unwrap();
-        account.mint_info = Some(json!({"supply":"1000000000","decimals":6,"mintAuthority":owner,"freezeAuthority":null,
+        account.mint_info = Some(json!({"isInitialized":true,"supply":"1000000000","decimals":6,"mintAuthority":owner,"freezeAuthority":null,
             "extensions":[{"extension":"tokenMetadata","state":{"symbol":(["TEST","FROZEN","T22","EMPTY"][i as usize]),"name":"Demo token"}}]}));
         account
     }).collect();

@@ -62,6 +62,7 @@ impl Services {
         app.token_genesis = None;
         app.token_error = None;
         app.token_export = None;
+        app.token_operation = None;
         app.token_warnings.clear();
         app.history_loading = false;
         app.refresh = RefreshState::Idle;
@@ -266,7 +267,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 match event.update {
                     OperationUpdate::Prepared(prepared) => { app.busy = None; app.modal = Some(Modal::Review { prepared, scroll: 0 }); ui.animate(&app); },
                     OperationUpdate::Submitted(signature) => { app.last_signature = Some(signature.clone()); app.busy = Some("Waiting for transaction confirmation…".into()); app.log("INFO", format!("Submitted {signature}")); services.command(Command::Refresh); },
-                    OperationUpdate::Finished(signature) => { app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
+                    OperationUpdate::Finished(signature) => { if app.view == crate::app::View::Tokens { services.load_tokens(&mut app); } app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Exported(path) => { app.busy = None; app.status = format!("Signed transaction exported to {path} · not submitted"); app.log("INFO", app.status.clone()); },
                     OperationUpdate::Failed(message) => { app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
                     OperationUpdate::FundingFailed(message) => {
@@ -402,6 +403,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 | Action::RpcAirdrop
                 | Action::BrowserFaucet(_)
                 | Action::Send
+                | Action::CreateTokenAccount
                 | Action::ImportTransaction
                 | Action::Submit
         )
@@ -409,6 +411,51 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         bail!("Wait for the current operation to finish");
     }
     match action {
+        Action::Send
+            if app.view == crate::app::View::Tokens
+                || matches!(app.modal, Some(Modal::Token { .. })) =>
+        {
+            let account = if let Some(Modal::Token { account, .. }) = &app.modal {
+                account.as_ref()
+            } else {
+                app.selected_token()
+                    .context("Select a token account first")?
+            }
+            .clone();
+            anyhow::ensure!(
+                account.state == "initialized",
+                "Source account is frozen or uninitialized"
+            );
+            crate::token_operations::ensure_supported(account.info())?;
+            crate::token_operations::ensure_supported(
+                account
+                    .mint_info
+                    .as_ref()
+                    .context("Refresh mint details before transferring")?,
+            )?;
+            app.wallet().context("Select a signing wallet first")?;
+            app.token_operation = Some(account);
+            app.open_form(FormKind::TokenTransfer);
+        }
+        Action::CreateTokenAccount => {
+            let owner = app
+                .wallet()
+                .context("Select a signing wallet first")?
+                .address
+                .clone();
+            let mint = if let Some(Modal::Token { account, .. }) = &app.modal {
+                Some(account.mint.clone())
+            } else {
+                app.selected_token().map(|a| a.mint.clone())
+            };
+            app.open_form(FormKind::TokenCreate);
+            if let Some(Modal::Form(form)) = &mut app.modal {
+                form.fields[1].insert(&owner);
+                if let Some(mint) = mint {
+                    form.fields[0].insert(&mint);
+                }
+            }
+        }
         Action::SelectToken(index) => {
             app.token_cursor = index;
             if let Some(account) = app.selected_token() {
@@ -941,6 +988,66 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                     let _ = sender.send(OperationEvent { session, update }).await;
                 });
             }
+        }
+        FormKind::TokenTransfer | FormKind::TokenCreate => {
+            if services.offline {
+                bail!("Online simulation is required for token operations");
+            }
+            let wallet = app
+                .wallet()
+                .context("Select a signing wallet first")?
+                .clone();
+            let profile = app.profile().clone();
+            let selected = app.token_operation.clone();
+            if kind == FormKind::TokenTransfer {
+                anyhow::ensure!(
+                    app.token_genesis.as_deref()
+                        == app.network.as_ref().map(|n| n.genesis.as_str()),
+                    "Network identity changed or unavailable; refresh token accounts first"
+                );
+            }
+            let expected_genesis = app.token_genesis.clone();
+            let session = app.session;
+            let sender = services.operation_sender.clone();
+            app.busy = Some("Simulating token operation…".into());
+            services.jobs.spawn(async move {
+                let result = async {
+                    let prepared = if kind == FormKind::TokenCreate {
+                        crate::token_operations::prepare_create(
+                            &profile,
+                            &wallet,
+                            &values[0],
+                            &values[1],
+                            values[2].parse()?,
+                        )
+                        .await?
+                    } else {
+                        crate::token_operations::prepare_transfer(
+                            &profile,
+                            &wallet,
+                            selected.as_ref().context("No source account")?,
+                            &values[0],
+                            &values[1],
+                            values[2] == "Token account",
+                            values[3].parse()?,
+                        )
+                        .await?
+                    };
+                    if kind == FormKind::TokenTransfer {
+                        anyhow::ensure!(
+                            Some(&prepared.genesis) == expected_genesis.as_ref(),
+                            "Token accounts belong to a different network; refresh first"
+                        );
+                    }
+                    Ok::<_, anyhow::Error>(prepared)
+                }
+                .await;
+                let update = match result {
+                    Ok(prepared) => OperationUpdate::Prepared(Box::new(prepared)),
+                    Err(error) => OperationUpdate::Failed(network::safe_error(error, &profile)),
+                };
+                let _ = sender.send(OperationEvent { session, update }).await;
+            });
         }
         FormKind::TransactionImport => {
             if services.offline {

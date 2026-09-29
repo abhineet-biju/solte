@@ -222,6 +222,8 @@ impl Ui {
             Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
             &[
                 ("Find [/]", Action::Search),
+                ("Send [s]", Action::Send),
+                ("Create ATA [a]", Action::CreateTokenAccount),
                 ("Refresh [r]", Action::Refresh),
             ],
             theme,

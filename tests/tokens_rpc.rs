@@ -24,6 +24,10 @@ impl Drop for Server {
 }
 
 async fn server(partial: bool) -> Server {
+    server_on_network(partial, network::DEVNET_GENESIS).await
+}
+
+async fn server_on_network(partial: bool, genesis: &'static str) -> Server {
     let mut app = App::new("/fixture".into(), Config::default(), vec![]);
     demo::populate(&mut app);
     let accounts = Arc::new(app.tokens);
@@ -67,7 +71,7 @@ async fn server(partial: bool) -> Server {
                     serde_json::from_slice(&data[header..header + length]).unwrap();
                 saved.lock().unwrap().push(request.clone());
                 let result = match request["method"].as_str().unwrap() {
-                    "getGenesisHash" => json!(network::DEVNET_GENESIS),
+                    "getGenesisHash" => json!(genesis),
                     "getTokenAccountsByOwner" => {
                         json!({"context":{"slot":42},"value": accounts.iter()
                         .filter(|a| a.program == request["params"][1]["programId"])
@@ -78,6 +82,26 @@ async fn server(partial: bool) -> Server {
                         .map(|mint| { let a = accounts.iter().find(|a| a.mint == *mint).unwrap();
                             json!({"owner":a.program,"data":{"parsed":{"type":"mint","info":a.mint_info}}}) }).collect::<Vec<_>>()})
                     }
+                    "getAccountInfo" => {
+                        let address = request["params"][0].as_str().unwrap();
+                        let value = if let Some(a) = accounts.iter().find(|a| a.address == address)
+                        {
+                            a.account.clone()
+                        } else if let Some(a) = accounts.iter().find(|a| a.mint == address) {
+                            json!({"owner":a.program,"data":{"parsed":{"type":"mint","info":a.mint_info}}})
+                        } else {
+                            Value::Null
+                        };
+                        json!({"context":{"slot":42},"value":value})
+                    }
+                    "getMinimumBalanceForRentExemption" => json!(2039280),
+                    "getLatestBlockhash" => {
+                        json!({"context":{"slot":42},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":200}})
+                    }
+                    "simulateTransaction" => {
+                        json!({"context":{"slot":42},"value":{"err":null,"logs":["Program success"],"accounts":null,"unitsConsumed":5000,"loadedAccountsDataSize":1000}})
+                    }
+                    "getFeeForMessage" => json!({"context":{"slot":42},"value":5000}),
                     method => panic!("Unexpected method: {method}"),
                 };
                 let body = if partial && request["method"] == "getTokenAccountsByOwner" && request["params"][1]["programId"] == tokens::TOKEN_2022 {
@@ -148,4 +172,140 @@ async fn failed_program_discovery_reports_partial_coverage() {
     assert_eq!(snapshot.accounts.len(), 3);
     assert!(!snapshot.warnings.is_empty());
     assert!(snapshot.warnings[0].contains("Token-2022"));
+}
+
+#[tokio::test]
+async fn token_operations_simulate_exact_instructions_without_signing_or_submission() {
+    let server = server(false).await;
+    let mut app = App::new("/fixture".into(), Config::default(), vec![]);
+    demo::populate(&mut app);
+    let destination = solana_pubkey::Pubkey::new_from_array([99; 32]).to_string();
+    for index in [0, 2] {
+        for format in [
+            solte::transaction::Format::Legacy,
+            solte::transaction::Format::V0,
+            solte::transaction::Format::V1,
+        ] {
+            let prepared = solte::token_operations::prepare_transfer(
+                &server.profile,
+                &app.wallets[0],
+                &app.tokens[index],
+                &destination,
+                "0.000001",
+                false,
+                format,
+            )
+            .await
+            .unwrap();
+            assert!(prepared.simulation_error.is_none());
+            assert!(
+                prepared
+                    .transaction
+                    .signatures
+                    .iter()
+                    .all(|s| *s == solana_signature::Signature::default())
+            );
+            let instructions = prepared.transaction.message.instructions();
+            assert_eq!(instructions.len(), 2);
+            assert_eq!(instructions[0].data, [1]);
+            assert_eq!(instructions[1].data, [12, 1, 0, 0, 0, 0, 0, 0, 0, 6]);
+            assert!(prepared.summary.iter().any(|s| s.contains("raw 1")));
+            assert_eq!(prepared.last_valid_block_height, 200);
+        }
+    }
+    let prepared = solte::token_operations::prepare_create(
+        &server.profile,
+        &app.wallets[0],
+        &app.tokens[2].mint,
+        &destination,
+        solte::transaction::Format::Auto,
+    )
+    .await
+    .unwrap();
+    assert_eq!(prepared.transaction.message.instructions().len(), 1);
+    assert!(prepared.summary.iter().any(|s| s.contains("idempotent")));
+    assert!(
+        !server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r["method"] == "sendTransaction")
+    );
+}
+
+#[tokio::test]
+async fn token_transfers_reject_frozen_precision_balance_and_wrong_destination() {
+    let server = server(false).await;
+    let mut app = App::new("/fixture".into(), Config::default(), vec![]);
+    demo::populate(&mut app);
+    let destination = solana_pubkey::Pubkey::new_from_array([99; 32]).to_string();
+    for (index, value, target, explicit) in [
+        (1, "1", destination.as_str(), false),
+        (0, "0.0000001", destination.as_str(), false),
+        (0, "126", destination.as_str(), false),
+        (0, "1", app.tokens[2].address.as_str(), true),
+        (0, "1", destination.as_str(), true),
+    ] {
+        assert!(
+            solte::token_operations::prepare_transfer(
+                &server.profile,
+                &app.wallets[0],
+                &app.tokens[index],
+                target,
+                value,
+                explicit,
+                solte::transaction::Format::Auto
+            )
+            .await
+            .is_err()
+        );
+    }
+    assert!(
+        !server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r["method"] == "simulateTransaction")
+    );
+}
+
+#[tokio::test]
+async fn mainnet_token_operations_are_rejected_before_reading_accounts() {
+    let server = server_on_network(false, network::MAINNET_GENESIS).await;
+    let mut app = App::new("/fixture".into(), Config::default(), vec![]);
+    demo::populate(&mut app);
+    assert!(
+        solte::token_operations::prepare_create(
+            &server.profile,
+            &app.wallets[0],
+            &app.tokens[0].mint,
+            &app.wallets[0].address,
+            solte::transaction::Format::Auto
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        solte::token_operations::prepare_transfer(
+            &server.profile,
+            &app.wallets[0],
+            &app.tokens[0],
+            &app.wallets[1].address,
+            "1",
+            false,
+            solte::transaction::Format::Auto
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r["method"] == "getGenesisHash")
+    );
 }

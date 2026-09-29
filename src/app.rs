@@ -121,6 +121,8 @@ pub enum FormKind {
     LogSearch,
     TokenSearch,
     TokenExport,
+    TokenCreate,
+    TokenTransfer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,6 +145,7 @@ pub enum Action {
     CopyToken(bool),
     ExplorerToken(bool),
     ExportToken,
+    CreateTokenAccount,
     CopyLog,
     SelectTransaction(usize),
     New,
@@ -279,6 +282,20 @@ impl Form {
                 Field::new("HTTP RPC endpoint", "http://127.0.0.1:8899"),
                 Field::new("WebSocket endpoint", "ws://127.0.0.1:8900"),
             ],
+            FormKind::TokenCreate => vec![
+                Field::new("Mint address", ""),
+                Field::new("Recipient wallet address", ""),
+                Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
+            ],
+            FormKind::TokenTransfer => vec![
+                Field::new("Destination address", ""),
+                Field::new("Amount · tokens", ""),
+                Field::choice(
+                    "Destination type · [←]/[→] choose",
+                    &["Wallet / create ATA", "Token account"],
+                ),
+                Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
+            ],
             FormKind::TokenSearch => {
                 vec![Field::new("Mint, account, program, state or delegate", "")]
             }
@@ -305,6 +322,8 @@ impl Form {
             FormKind::LogSearch => "Filter logs",
             FormKind::TokenSearch => "Filter token accounts",
             FormKind::TokenExport => "Export token account",
+            FormKind::TokenCreate => "Create associated token account",
+            FormKind::TokenTransfer => "Send tokens",
         }
     }
     pub fn submit_label(&self) -> &'static str {
@@ -315,6 +334,7 @@ impl Form {
             FormKind::Transfer | FormKind::TransactionImport => "Simulate & review",
             FormKind::Profile => "Save profile",
             FormKind::TokenExport => "Export JSON",
+            FormKind::TokenCreate | FormKind::TokenTransfer => "Simulate & review",
             FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch => "Apply filter",
         }
     }
@@ -476,6 +496,7 @@ pub struct App {
     pub tokens: Vec<crate::tokens::TokenAccount>,
     pub token_cursor: usize,
     pub token_export: Option<crate::tokens::TokenAccount>,
+    pub token_operation: Option<crate::tokens::TokenAccount>,
     pub token_filter: String,
     pub token_loading: bool,
     pub token_updated: Option<Instant>,
@@ -529,6 +550,7 @@ impl App {
             selector_focus: false,
             tokens: vec![],
             token_export: None,
+            token_operation: None,
             token_cursor: 0,
             token_filter: String::new(),
             token_loading: false,
@@ -826,6 +848,10 @@ impl App {
                 KeyCode::Char('3') if matches!(modal, Modal::Funding { .. }) => {
                     Some(Action::RpcAirdrop)
                 }
+                KeyCode::Char('s') if matches!(modal, Modal::Token { .. }) => Some(Action::Send),
+                KeyCode::Char('a') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::CreateTokenAccount)
+                }
                 KeyCode::Char('y') if matches!(modal, Modal::Token { .. }) => {
                     Some(Action::CopyToken(false))
                 }
@@ -885,6 +911,7 @@ impl App {
             )),
             KeyCode::Char('l' | 'L') => Some(Action::Navigate(Direction::Right)),
             KeyCode::Enter => Some(Action::Activate),
+            KeyCode::Char('a') if self.view == View::Tokens => Some(Action::CreateTokenAccount),
             KeyCode::Char('n') => Some(Action::New),
             KeyCode::Char('i') => Some(Action::Import),
             KeyCode::Char('f') => Some(Action::Fund),

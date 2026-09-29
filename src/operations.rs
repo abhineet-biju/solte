@@ -22,6 +22,7 @@ use crate::{
 };
 
 pub struct PreparedTransfer {
+    pub summary: Vec<String>,
     pub transaction: VersionedTransaction,
     pub accounts: Vec<Pubkey>,
     pub imported: bool,
@@ -133,7 +134,7 @@ pub async fn prepare_import(
     Ok(prepared)
 }
 
-async fn inspect(
+pub(crate) async fn inspect(
     profile: &RpcProfile,
     wallet: &Wallet,
     mut transaction: VersionedTransaction,
@@ -186,6 +187,7 @@ async fn inspect(
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| anyhow::anyhow!("Fee unavailable; blockhash may have expired"))?;
     Ok(PreparedTransfer {
+        summary: vec![],
         transaction,
         accounts,
         imported,
@@ -280,7 +282,7 @@ pub async fn submit(
             &store,
             &scope,
             "INFO",
-            format!("Submitting transfer {signature}"),
+            format!("Submitting transaction {signature}"),
         )
         .await;
         let _ = sender

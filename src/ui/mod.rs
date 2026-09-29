@@ -1263,7 +1263,9 @@ impl Ui {
             Modal::Wallet { .. } => "Wallet details",
             Modal::Inspect { .. } => "Transaction inspector",
             Modal::Review { prepared, .. } => {
-                if prepared.imported {
+                if !prepared.summary.is_empty() {
+                    "Review token operation"
+                } else if prepared.imported {
                     "Review imported transaction"
                 } else {
                     "Review SOL transfer"
@@ -1470,6 +1472,8 @@ impl Ui {
                     crate::app::FormKind::Profile => {
                         "Profiles are stored locally in .solte/config.toml."
                     }
+                    crate::app::FormKind::TokenCreate => "Creates the recipient wallet’s associated account for this mint. Payer covers rent.",
+                    crate::app::FormKind::TokenTransfer => "Amount uses mint decimals. Wallet destinations create an ATA if missing; explicit token accounts must already exist.",
                     crate::app::FormKind::TokenExport => "Exports public account data only. Existing files are never overwritten.",
                     crate::app::FormKind::TokenSearch => "Search mint, account, program, state, or delegate. Empty clears the filter.",
                     crate::app::FormKind::Search | crate::app::FormKind::LogSearch => {
@@ -1683,12 +1687,16 @@ impl Ui {
                     format!("From       {}", prepared.wallet.address),
                     if prepared.imported {
                         "Imported message · original bytes and co-signatures preserved".into()
+                    } else if !prepared.summary.is_empty() {
+                        prepared.summary.join("\n")
                     } else {
                         format!("To         {}", prepared.recipient)
                     },
                     format!("Network    {}", prepared.profile.name),
                     if prepared.imported {
                         "Review every instruction and account below before signing.".into()
+                    } else if !prepared.summary.is_empty() {
+                        "Review mint, raw amount, destination and rent above.".into()
                     } else {
                         format!("Amount     {} SOL", format_sol(prepared.lamports))
                     },
@@ -1775,6 +1783,9 @@ impl Ui {
                     "[o] Account Explorer   [O] Mint Explorer",
                     "[/] Filter by mint/account/program/state/delegate; [x] clears",
                     "[r] Refresh selected wallet's token accounts",
+                    "[s] Review token transfer   [a] Create associated account",
+                    "Transfer destination: wallet/create ATA or explicit token account",
+                    "Transfer-affecting Token-2022 extensions are inspectable only.",
                     "Token amounts use exact integers; empty accounts remain visible.",
                     "",
                     "TRANSACTIONS AND LOGS",
