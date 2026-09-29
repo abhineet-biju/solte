@@ -208,7 +208,7 @@ impl Ui {
                 ),
                 Action::SelectWallet(index),
                 theme,
-                index == app.wallet_cursor,
+                index == app.selected_wallet,
             );
         }
         if app.wallets.is_empty() {
@@ -339,6 +339,41 @@ mod tests {
             assert_eq!(app.selected_wallet, 0);
             for hit in &ui.hits {
                 assert!(hit.area.right() <= width && hit.area.bottom() <= height);
+            }
+        }
+    }
+
+    #[test]
+    fn overview_highlights_the_active_wallet_even_when_preview_cursor_differs() {
+        for (width, height) in [(80, 20), (120, 32), (160, 48)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            demo::populate(&mut app);
+            app.selected_wallet = 1;
+            app.wallet_cursor = 0;
+            let theme = Theme::named(&app.config.theme);
+            let mut ui = Ui::default();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            for index in [0, 1] {
+                let row = ui
+                    .hits
+                    .iter()
+                    .find(|hit| hit.action == Action::SelectWallet(index))
+                    .unwrap()
+                    .area;
+                let cell = &terminal.backend().buffer()[(row.x, row.y)];
+                assert_eq!(
+                    cell.fg,
+                    if index == app.selected_wallet {
+                        theme.accent
+                    } else {
+                        theme.text
+                    }
+                );
+                assert_eq!(
+                    cell.modifier.contains(ratatui::style::Modifier::BOLD),
+                    index == app.selected_wallet
+                );
             }
         }
     }
