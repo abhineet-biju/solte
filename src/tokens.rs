@@ -103,7 +103,7 @@ impl TokenAccount {
         let info = self.info();
         let mut lines = vec![
             format!("{} · {}", self.label(), self.program_label()),
-            format!("Balance      {}", format_amount(self.amount, self.decimals)),
+            format!("Base balance {}", format_amount(self.amount, self.decimals)),
             format!("Raw amount   {}", self.amount),
             format!("Decimals     {}", self.decimals),
             format!("State        {}", self.state),
@@ -123,6 +123,13 @@ impl TokenAccount {
                 "Lamports     {} · {} SOL",
                 self.lamports,
                 crate::amount::format_sol(self.lamports)
+            ),
+            format!(
+                "Account size {}",
+                self.account["space"]
+                    .as_u64()
+                    .map(|size| format!("{size} bytes"))
+                    .unwrap_or_else(|| "Unavailable".into())
             ),
             format!("Read at slot {}", self.slot),
             String::new(),
@@ -326,6 +333,11 @@ pub async fn fetch(rpc: &RpcClient, owner: &Pubkey) -> Result<Snapshot> {
             warnings.push("Some mint details are unavailable".into());
         }
     }
+    if accounts.iter().any(|account| account.mint_info.is_none()) {
+        warnings.push("Some mint details are unavailable".into());
+    }
+    warnings.sort();
+    warnings.dedup();
     ensure!(
         rpc.get_genesis_hash().await?.to_string() == genesis,
         "Network changed during token discovery; refresh again"

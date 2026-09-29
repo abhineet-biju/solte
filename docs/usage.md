@@ -54,12 +54,43 @@ Use `s` to enter a recipient and amount, inspect an unsigned simulation, then ex
 
 Click a transaction row or press Enter to inspect its error, logs, instructions, inner instructions, and token balance metadata. Explorer and copy actions are available by mouse and keyboard. Copy uses the terminal's OSC 52 clipboard support. Custom RPC URLs that may contain credentials are not sent to an external explorer.
 
+## Token accounts
+
+Open **Tokens [3]** or launch with `solte --view tokens`. The view discovers owned accounts from SPL Token and Token-2022, including empty accounts and multiple accounts for the same mint. It identifies associated accounts and custom accounts. Frozen accounts appear in red; balances use exact raw integers and mint decimals.
+
+Use `j`/`k`, Page Up/Down, or the mouse to select accounts. Wide windows show a details preview. Enter or clicking a row opens the full scrollable inspector at every size. It shows account/mint/program addresses, raw balance, decimals, account state, lamports, authorities, delegates, mint supply and decoded extensions. Token-2022 display adjustments are shown as extensions; the numeric balance is the base amount derived from raw units.
+
+- `[y]` copies the account address; `[M]` copies the mint.
+- `[o]` opens the account in Explorer; `[O]` opens the mint.
+- `[E]` exports public account and mint details as JSON. Existing files are never overwritten.
+- `[/]` searches addresses, token labels, program, state and delegate; `[x]` clears the search.
+- `[r]` refreshes with visible progress. Accounts refresh every 15 seconds while this view is open. Partial discovery and missing mint data are explicit; a failed refresh retains the previous accounts.
+- `[a]` prepares associated account creation for a mint and recipient wallet. It preserves an existing ATA and shows the rent estimate and paying wallet before signing.
+- `[s]` prepares a checked transfer from the selected account. Choose a recipient wallet to create its ATA if missing, or an explicit existing token account for the same mint and program. Enter the amount in token units, using no more than the mint's decimal places.
+
+Both operations simulate unsigned transactions and require explicit review before signing/submitting. Auto uses Legacy; Legacy, v0 and v1 can be selected explicitly. Invalid decimals, insufficient balances, frozen accounts and incompatible destinations are rejected. Mainnet signing remains disabled. Token-2022 extensions that change transfers, amounts or account permissions require additional implementation; those accounts remain inspectable, and unsupported transfers fail with the extension name. Mint creation, burning and authority changes are not part of the current Tokens composer.
+
+Token snapshots are held in memory, scoped to the selected wallet and network. Switching wallets or profiles clears them. Offline mode does not load cached token balances; demo mode provides fixtures and disables signing.
+
+To run the token workflow through a real pseudo-terminal:
+
+```sh
+python3 scripts/token_smoke.py --binary target/debug/solte
+```
+
+To test both token programs on an isolated local validator, use loopback endpoints and disposable test wallets:
+
+```sh
+SOLTE_TEST_RPC=http://127.0.0.1:8899 SOLTE_TEST_WS=ws://127.0.0.1:8900 \
+  cargo test --locked --test token_localnet -- --ignored
+```
+
 ## Navigation
 
 | Action | Keys |
 |---|---|
 | Move focus within the current view | Tab / Shift-Tab |
-| Overview / Wallets / Transactions / Network / Logs | 1 / 2 / 3 / 4 / 5 |
+| Overview / Wallets / Tokens / Transactions / Network / Logs | 1 / 2 / 3 / 4 / 5 / 6 |
 | Previous / next main view | Left / Right arrows |
 | Navigate options within the focused panel | h / j / k / l, Up / Down arrows |
 | Scroll the current list or view | Page Up / Page Down |
@@ -67,7 +98,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Create / import / cycle identity | n / i / ] |
 | Funding options / send SOL | f / s |
 | RPC profiles / refresh | p / r or R |
-| Search current Transactions or Logs view / transaction failures | / / e |
+| Search current Tokens, Transactions or Logs view / transaction failures | / / e |
 | Fetch or load older records | b |
 | Open transaction explorer / copy wallet address | o / y |
 | Clear transaction search | x |
@@ -76,9 +107,9 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 | Open focused summary / return to Overview | z |
 | Help / close dialog / quit | ? / Escape / q |
 
-The top bar switches between distinct views. Overview combines wallet, activity, network, and log summaries; Wallets, Transactions, Network, and Logs use the workspace for their own content. Use the main tabs or z to visit a summary’s full view. At narrower widths Overview reduces the number of summaries while all five views remain accessible. The minimum size is 60 columns by 10 rows.
+The top bar switches between distinct views. Overview combines wallet, activity, network, and log summaries; Wallets, Tokens, Transactions, Network, and Logs use the workspace for their own content. Use the main tabs or z to visit a summary’s full view. At narrower widths Overview reduces the number of summaries while all six views remain accessible. The minimum size is 60 columns by 10 rows.
 
-The highlighted control has keyboard focus. Left/right arrows switch main views directly. Use k/up at the top of a page to reach the view selector, h/l to switch views there, and j/down or Enter to enter the page. In dialogs, left/right do not change the underlying view; in text fields they move the cursor. Tab and Shift-Tab move between visible focus regions without changing views. Clicks and Enter invoke the same actions. Forms accept normal text input, arrow keys move the cursor, and Tab switches fields. Each view preserves its navigation state; Transactions and Logs have separate search filters.
+The highlighted control has keyboard focus. Left/right arrows switch main views directly. Use k/up at the top of a page to reach the view selector, h/l to switch views there, and j/down or Enter to enter the page. In dialogs, left/right do not change the underlying view; in text fields they move the cursor. Tab and Shift-Tab move between visible focus regions without changing views. Clicks and Enter invoke the same actions. Forms accept normal text input, arrow keys move the cursor, and Tab switches fields. Each view preserves its navigation state; Tokens, Transactions and Logs have separate search filters.
 
 Use `solte --view network` to open a particular view. `--view` also works with `--demo` and `--snapshot` for reproducible previews.
 
@@ -102,7 +133,7 @@ Current limits:
 - Monitoring runs while Solte is open. Reopening recovers data the RPC still serves; it cannot reconstruct pruned history or historical closed token accounts it never observed.
 - Transactions submitted by another application are visible if they reach the chain and involve a watched address. Rejected approvals and preflight failures from other applications require a future integration.
 - Transaction reading and inspection support legacy, v0, and v1. Unavailable metadata and RPC errors remain explicit in the inspector.
-- The built-in composer sends native SOL in legacy, v0, or v1 format. Imported transactions can contain other program instructions. Dedicated token tools, browser pairing, and hardware wallets are outside this release.
+- The built-in composer sends native SOL in legacy, v0, or v1 format. Imported transactions can contain other program instructions. The Tokens view composes token transfers and associated account creation. Browser pairing and hardware wallets are outside this release.
 - Devnet airdrops depend on faucet availability and rate limits. Custom development chains must expose compatible Solana RPC methods.
 
 ## Development and verification

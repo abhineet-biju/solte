@@ -138,6 +138,7 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 cargo build --locked
 python3 scripts/terminal_smoke.py
+python3 scripts/token_smoke.py
 python3 -m unittest discover -s scripts/tests -v
 ```
 

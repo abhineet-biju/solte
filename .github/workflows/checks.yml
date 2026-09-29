@@ -34,4 +34,5 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo build --locked
       - run: python3 scripts/terminal_smoke.py
+      - run: python3 scripts/token_smoke.py
       - run: python3 -m unittest discover -s scripts/tests -v

@@ -46,7 +46,17 @@ impl Ui {
             return;
         }
         let state = if app.token_loading {
-            "Refreshing…".into()
+            if app.config.reduced_motion {
+                "Refreshing…".into()
+            } else {
+                format!(
+                    "Refreshing {}",
+                    ['|', '/', '-', '\\'][app
+                        .token_started
+                        .map_or(0, |at| at.elapsed().as_millis() / 120 % 4)
+                        as usize]
+                )
+            }
         } else if let Some(error) = &app.token_error {
             format!("Unavailable · {error}")
         } else if !app.token_warnings.is_empty() {
@@ -145,7 +155,7 @@ impl Ui {
             };
             let text = if detailed {
                 format!(
-                    "{}  {}  {} · {}\n{}  {}  {}",
+                    "{}  {}  {} · {}\nAccount {}  Mint {}  {}",
                     account.label(),
                     balance,
                     account.program_label(),
@@ -189,7 +199,7 @@ impl Ui {
             );
             let block = Block::bordered()
                 .border_type(BorderType::Rounded)
-                .title(" Selected account ")
+                .title(" Selected account · [Enter] details ")
                 .border_style(Style::default().fg(theme.border));
             let content = block.inner(details);
             frame.render_widget(block, details);
@@ -240,6 +250,50 @@ mod tests {
         demo,
     };
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn token_forms_keep_every_field_and_submission_inside_compact_dialogs() {
+        for (width, height) in [(60, 10), (80, 20), (160, 48)] {
+            let mut app = App::new("/test".into(), Config::default(), vec![]);
+            demo::populate(&mut app);
+            let mut ui = Ui::default();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            for kind in [
+                crate::app::FormKind::TokenCreate,
+                crate::app::FormKind::TokenTransfer,
+                crate::app::FormKind::TokenExport,
+                crate::app::FormKind::TokenSearch,
+            ] {
+                app.open_form(kind);
+                let count = if let Some(crate::app::Modal::Form(form)) = &app.modal {
+                    form.fields.len()
+                } else {
+                    0
+                };
+                for index in 0..count {
+                    app.navigate(&Action::Field(index));
+                    terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                    assert!(ui.hits.iter().any(|hit| hit.action == Action::Field(index)));
+                    let submit = ui
+                        .hits
+                        .iter()
+                        .find(|hit| hit.action == Action::Submit)
+                        .unwrap();
+                    assert!(
+                        ui.hits
+                            .iter()
+                            .filter(|hit| matches!(hit.action, Action::Field(_)))
+                            .all(|hit| hit.area.intersection(submit.area).is_empty())
+                    );
+                    assert!(
+                        ui.hits
+                            .iter()
+                            .all(|hit| hit.area.right() <= width && hit.area.bottom() <= height)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn tokens_keep_navigation_copy_and_inspection_accessible_after_resize() {

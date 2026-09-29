@@ -58,6 +58,7 @@ impl Services {
         app.tokens.clear();
         app.token_cursor = 0;
         app.token_loading = false;
+        app.token_started = None;
         app.token_updated = None;
         app.token_genesis = None;
         app.token_error = None;
@@ -107,6 +108,7 @@ impl Services {
         let session = app.session;
         let sender = self.local_sender.clone();
         app.token_loading = true;
+        app.token_started = Some(Instant::now());
         app.token_error = None;
         self.jobs.spawn(async move {
             let result =
@@ -252,6 +254,10 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                         app.log(level, message);
                     },
                     Update::Network(network, balance) => {
+                        if app.token_genesis.as_ref().is_some_and(|genesis| *genesis != network.genesis) {
+                            app.tokens.clear(); app.token_cursor = 0; app.token_updated = None;
+                            app.token_genesis = None; app.token_error = None; app.token_warnings.clear();
+                        }
                         if !matches!(app.refresh, RefreshState::Pending(_)) {
                             app.status = format!("{} · confirmed activity · captured history stored locally", network.cluster);
                         }
@@ -279,21 +285,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 }
             },
             Some(event) = local_receiver.recv() => match event {
-                LocalEvent::Tokens { session, result } => if session == app.session {
-                    app.token_loading = false;
-                    match result {
-                        Ok(snapshot) => {
-                            let selected = app.selected_token().map(|a| a.address.clone());
-                            app.tokens = snapshot.accounts; app.token_genesis = Some(snapshot.genesis);
-                            app.token_warnings = snapshot.warnings; app.token_updated = Some(Instant::now());
-                            app.token_error = None;
-                            app.token_cursor = app.visible_tokens().iter().position(|a| Some(&a.address) == selected.as_ref()).unwrap_or(0);
-                            if matches!(app.focused_control, Some(Action::SelectToken(_))) { app.focused_control = Some(Action::SelectToken(app.token_cursor)); }
-                            app.status = format!("Token accounts refreshed · {} accounts{}", app.tokens.len(), if app.token_warnings.is_empty() { "" } else { " · partial coverage" });
-                        }
-                        Err(error) => { app.token_error = Some(error.to_string()); app.status = format!("Token refresh failed: {error}"); }
-                    }
-                },
+                LocalEvent::Tokens { session, result } => apply_token_update(&mut app, session, result),
                 LocalEvent::Wallet(result) => {
                     app.busy = None;
                     match result {
@@ -316,7 +308,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
             Some(result) = services.jobs.join_next(), if !services.jobs.is_empty() => {
                 if let Err(error) = result { app.busy = None; report_error(&mut app, format!("Background task stopped: {error}")); }
             },
-            _ = animation_tick.tick(), if ui.animating() || (!app.config.reduced_motion && matches!(app.refresh, RefreshState::Pending(_))) => {},
+            _ = animation_tick.tick(), if ui.animating() || (!app.config.reduced_motion && (matches!(app.refresh, RefreshState::Pending(_)) || (app.view == crate::app::View::Tokens && app.token_loading))) => {},
             _ = status_tick.tick() => {},
         }
         if app.view == crate::app::View::Tokens
@@ -338,6 +330,52 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
     services.monitor = None;
     services.jobs.abort_all();
     Ok(())
+}
+
+fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens::Snapshot>) {
+    if session != app.session {
+        return;
+    }
+    app.token_loading = false;
+    match result {
+        Ok(snapshot) => {
+            if app
+                .network
+                .as_ref()
+                .is_some_and(|network| network.genesis != snapshot.genesis)
+            {
+                app.token_error = Some("Network changed; refresh token accounts again".into());
+                return;
+            }
+            let selected = app.selected_token().map(|a| a.address.clone());
+            app.tokens = snapshot.accounts;
+            app.token_genesis = Some(snapshot.genesis);
+            app.token_warnings = snapshot.warnings;
+            app.token_updated = Some(Instant::now());
+            app.token_error = None;
+            app.token_cursor = app
+                .visible_tokens()
+                .iter()
+                .position(|a| Some(&a.address) == selected.as_ref())
+                .unwrap_or(0);
+            if matches!(app.focused_control, Some(Action::SelectToken(_))) {
+                app.focused_control = Some(Action::SelectToken(app.token_cursor));
+            }
+            app.status = format!(
+                "Token accounts refreshed · {} accounts{}",
+                app.tokens.len(),
+                if app.token_warnings.is_empty() {
+                    ""
+                } else {
+                    " · partial coverage"
+                }
+            );
+        }
+        Err(error) => {
+            app.token_error = Some(error.to_string());
+            app.status = format!("Token refresh failed: {error}");
+        }
+    }
 }
 
 fn report_error(app: &mut App, message: String) {
@@ -433,11 +471,22 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                     .as_ref()
                     .context("Refresh mint details before transferring")?,
             )?;
-            app.wallet().context("Select a signing wallet first")?;
+            anyhow::ensure!(
+                !app.wallet()
+                    .context("Select a signing wallet first")?
+                    .program,
+                "Program identities are read-only"
+            );
             app.token_operation = Some(account);
             app.open_form(FormKind::TokenTransfer);
         }
         Action::CreateTokenAccount => {
+            anyhow::ensure!(
+                !app.wallet()
+                    .context("Select a signing wallet first")?
+                    .program,
+                "Program identities are read-only"
+            );
             let owner = app
                 .wallet()
                 .context("Select a signing wallet first")?
@@ -493,8 +542,15 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                     "address",
                     &address,
                 )?;
+                let sender = services.local_sender.clone();
+                app.status = "Opening Solana Explorer…".into();
                 services.jobs.spawn(async move {
-                    let _ = tokio::task::spawn_blocking(move || open::that(url)).await;
+                    let result = tokio::task::spawn_blocking(move || open::that(url))
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .and_then(|result| result.map_err(anyhow::Error::from))
+                        .map(|_| "Opened Solana Explorer".into());
+                    let _ = sender.send(LocalEvent::Notice(result)).await;
                 });
             }
         }
@@ -1112,6 +1168,77 @@ fn ensure_export_path(value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_updates_retain_selection_and_ignore_old_sessions_or_networks() {
+        let mut app = App::new("/fixture".into(), crate::config::Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.session = 3;
+        app.token_cursor = 2;
+        let selected = app.selected_token().unwrap().address.clone();
+        let snapshot = crate::tokens::Snapshot {
+            genesis: network::DEVNET_GENESIS.into(),
+            accounts: app.tokens.iter().rev().cloned().collect(),
+            warnings: vec![],
+        };
+        app.token_loading = true;
+        apply_token_update(&mut app, 2, Ok(snapshot.clone()));
+        assert!(app.token_loading);
+        assert_eq!(app.token_cursor, 2);
+        apply_token_update(&mut app, 3, Ok(snapshot.clone()));
+        assert!(!app.token_loading);
+        assert_eq!(app.selected_token().unwrap().address, selected);
+        let mut wrong = snapshot;
+        wrong.genesis = "different-network".into();
+        apply_token_update(&mut app, 3, Ok(wrong));
+        assert_eq!(app.selected_token().unwrap().address, selected);
+        assert!(
+            app.token_error
+                .as_ref()
+                .unwrap()
+                .contains("Network changed")
+        );
+    }
+
+    #[tokio::test]
+    async fn token_keyboard_and_mouse_actions_open_the_same_forms() {
+        let mut app = App::new("/fixture".into(), crate::config::Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        app.switch_view(crate::app::View::Tokens);
+        let directory = tempfile::tempdir().unwrap();
+        let (network_sender, _) = mpsc::channel(1);
+        let (operation_sender, _) = mpsc::channel(1);
+        let (local_sender, _) = mpsc::channel(1);
+        let mut services = Services {
+            store: Store::open(directory.path()).unwrap(),
+            network_sender,
+            operation_sender,
+            local_sender,
+            monitor: None,
+            jobs: JoinSet::new(),
+            offline: false,
+        };
+        for action in [
+            app.key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('s'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap(),
+            Action::Send,
+        ] {
+            handle(&mut app, &mut services, action).await.unwrap();
+            assert!(
+                matches!(&app.modal,Some(Modal::Form(form)) if form.kind == FormKind::TokenTransfer)
+            );
+            app.modal = None;
+        }
+        handle(&mut app, &mut services, Action::CreateTokenAccount)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.modal,Some(Modal::Form(form)) if form.kind == FormKind::TokenCreate && form.fields[1].value == app.wallet().unwrap().address)
+        );
+    }
 
     #[tokio::test]
     async fn log_inspection_keeps_the_selected_entry_when_new_logs_arrive() {

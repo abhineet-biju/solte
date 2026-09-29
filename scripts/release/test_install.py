@@ -130,9 +130,10 @@ def main():
             report = portability(binary, args.target)
             subprocess.run([binary, "--demo", "--snapshot", str(root / "demo.svg")], cwd=project, env=env, check=True, stdout=subprocess.DEVNULL)
             subprocess.run([shutil.which("python3") or "python3", str(Path(__file__).resolve().parents[1] / "terminal_smoke.py"), "--binary", str(binary)], env=env, check=True, timeout=120)
+            subprocess.run([shutil.which("python3") or "python3", str(Path(__file__).resolve().parents[1] / "token_smoke.py"), "--binary", str(binary)], env=env, check=True, timeout=120)
             after = {str(p.relative_to(project)): digest(p) for p in project.rglob("*") if p.is_file()}
             assert before == after, "Installation or demo launch modified wallet/configuration data"
-            report.update(version=args.version, previous_version=previous_version, archive_sha256=checksum, tests="upgrade, reinstall, checksum rejection, custom path, archive, version, demo, terminal smoke, project preservation")
+            report.update(version=args.version, previous_version=previous_version, archive_sha256=checksum, tests="upgrade, reinstall, checksum rejection, custom path, archive, version, demo, terminal smoke, token terminal smoke, project preservation")
             if args.report:
                 args.report.parent.mkdir(parents=True, exist_ok=True)
                 args.report.write_text(json.dumps(report, indent=2) + "\n")

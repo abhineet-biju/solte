@@ -36,7 +36,7 @@ pub fn populate(app: &mut App) {
         latency_ms: 42,
         healthy: true,
         version: "3.1.12".into(),
-        token_accounts: 3,
+        token_accounts: 4,
     });
     app.last_update = Some(Instant::now());
     let owner = app.wallets[0].address.clone();
@@ -77,7 +77,7 @@ pub fn populate(app: &mut App) {
         ),
         (
             "INFO",
-            "History retained locally · 3 token accounts watched",
+            "History retained locally · 4 token accounts watched",
         ),
     ] {
         app.push_log(LogEntry::new(level, message));
