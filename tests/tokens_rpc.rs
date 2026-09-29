@@ -502,3 +502,65 @@ async fn mint_more_checks_authority_and_exact_amount_without_signing_during_revi
         );
     }
 }
+
+#[tokio::test]
+async fn mint_mainnet_and_failed_reviews_never_create_project_records_or_send() {
+    use solte::{
+        mints::{self, CreateMint},
+        operations,
+        storage::Store,
+        transaction::Format,
+        wallet,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let payer = wallet::create(root.path(), "payer").unwrap();
+    let store = Store::open(root.path()).unwrap();
+    let mainnet = server_on_network(false, network::MAINNET_GENESIS).await;
+    let options = || CreateMint {
+        program: tokens::TOKEN_PROGRAM.parse().unwrap(),
+        decimals: 6,
+        authority: payer.address.parse().unwrap(),
+        freeze: None,
+        initial_supply: 0,
+        format: Format::Auto,
+    };
+    assert!(
+        mints::prepare_create(&mainnet.profile, &payer, &[], options())
+            .await
+            .is_err()
+    );
+    assert!(
+        mainnet
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r["method"] == "getGenesisHash")
+    );
+    let server = server(false).await;
+    let mut prepared = mints::prepare_create(&server.profile, &payer, &[], options())
+        .await
+        .unwrap();
+    prepared.simulation_error = Some("Insufficient funds".into());
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+    operations::submit(prepared, 1, store.clone(), sender).await;
+    assert!(matches!(
+        receiver.recv().await.unwrap().update,
+        operations::OperationUpdate::Failed(_)
+    ));
+    assert!(
+        store
+            .mints(&server.profile.http, network::DEVNET_GENESIS)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r["method"] == "sendTransaction")
+    );
+}

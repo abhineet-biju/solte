@@ -56,7 +56,7 @@ Click a transaction row or press Enter to inspect its error, logs, instructions,
 
 ## Token accounts
 
-Open **Tokens [3]** or launch with `solte --view tokens`. The action area separates inspection/sending from account creation and browsing tools. Copy, mint, JSON export and Explorer buttons are in the account inspector; their keyboard shortcuts also work from the list. The view discovers owned accounts from SPL Token and Token-2022, including empty accounts and multiple accounts for the same mint. It identifies associated accounts and custom accounts. Frozen accounts appear in red; balances use exact raw integers and mint decimals.
+Open **Tokens [3]** or launch with `solte --view tokens`. The action area separates inspection/sending from account creation and browsing tools. Copy account, Copy mint, JSON export and Explorer buttons are in the account inspector; their keyboard shortcuts also work from the list. The view discovers owned accounts from SPL Token and Token-2022, including empty accounts and multiple accounts for the same mint. It identifies associated accounts and custom accounts. Frozen accounts appear in red; balances use exact raw integers and mint decimals.
 
 Use `j`/`k`, Page Up/Down, or the mouse to select accounts. Wide windows show a details preview. Enter or clicking a row opens the full scrollable inspector at every size. It shows account/mint/program addresses, raw balance, decimals, account state, lamports, authorities, delegates, mint supply and decoded extensions. Token-2022 display adjustments are shown as extensions; the numeric balance is the base amount derived from raw units.
 
@@ -65,10 +65,15 @@ Use `j`/`k`, Page Up/Down, or the mouse to select accounts. Wide windows show a 
 - `[E]` exports public account and mint details as JSON. Existing files are never overwritten.
 - `[/]` searches addresses, token labels, program, state and delegate; `[x]` clears the search.
 - `[r]` refreshes with visible progress. Accounts refresh every 15 seconds while this view is open. Partial discovery and missing mint data are explicit; a failed refresh retains the previous accounts.
+- `[c]` opens Create. Choose a token mint or associated token account. Mint creation supports SPL Token and Token-2022 without extensions, defaults to 6 decimals and the active wallet's mint authority, and disables freeze authority unless you enter an address. Optional initial supply goes into the active wallet's ATA. A different mint authority must be loaded in Solte if you request initial supply.
+- `[v]` opens Project mints, including zero-supply mints without token accounts. Select a mint to inspect or copy its address, open Explorer, create an ATA, or mint more. `[t]` in the mint inspector opens the active wallet’s token account when one exists.
+- `[m]` in an inspector prepares additional issuance when its mint authority is loaded. Choose a recipient wallet and exact token amount; Solte creates the ATA if missing. The active wallet pays fees and rent, and the loaded authority signs. Revoked authorities and unsupported extensions are rejected.
 - `[a]` prepares associated account creation for a mint and recipient wallet. It preserves an existing ATA and shows the rent estimate and paying wallet before signing.
 - `[s]` prepares a checked transfer from the selected account. Choose a recipient wallet to create its ATA if missing, or an explicit existing token account for the same mint and program. Enter the amount in token units, using no more than the mint's decimal places.
 
-Both operations simulate unsigned transactions and require explicit review before signing/submitting. Auto uses Legacy; Legacy, v0 and v1 can be selected explicitly. Invalid decimals, insufficient balances, frozen accounts and incompatible destinations are rejected. Mainnet signing remains disabled. Token-2022 extensions that change transfers, amounts or account permissions require additional implementation; those accounts remain inspectable, and unsupported transfers fail with the extension name. Mint creation, burning and authority changes are not part of the current Tokens composer.
+All token operations simulate unsigned transactions and require explicit review before signing/submitting. Auto uses Legacy; Legacy, v0 and v1 can be selected explicitly. Invalid decimals, insufficient balances, frozen accounts and incompatible destinations are rejected. Mainnet signing remains disabled. Token-2022 extensions that change transfers, amounts or account permissions require additional implementation; those accounts remain inspectable, and unsupported transfers fail with the extension name. Burning, authority changes, metadata editing and Token-2022 extension configuration are not part of the current composer.
+
+Created mint addresses and creation signatures are stored as public records in `.solte/history.sqlite`, scoped to the RPC endpoint and genesis hash and shared across project wallets. Records are saved before broadcasting so uncertain submissions remain inspectable; a missing on-chain mint is labeled unavailable. The temporary mint signing key is never written to disk.
 
 Token snapshots are held in memory, scoped to the selected wallet and network. Switching wallets or profiles clears them. Offline mode does not load cached token balances; demo mode provides fixtures and disables signing.
 
@@ -133,7 +138,7 @@ Current limits:
 - Monitoring runs while Solte is open. Reopening recovers data the RPC still serves; it cannot reconstruct pruned history or historical closed token accounts it never observed.
 - Transactions submitted by another application are visible if they reach the chain and involve a watched address. Rejected approvals and preflight failures from other applications require a future integration.
 - Transaction reading and inspection support legacy, v0, and v1. Unavailable metadata and RPC errors remain explicit in the inspector.
-- The built-in composer sends native SOL in legacy, v0, or v1 format. Imported transactions can contain other program instructions. The Tokens view composes token transfers and associated account creation. Browser pairing and hardware wallets are outside this release.
+- The built-in composer sends native SOL in legacy, v0, or v1 format. Imported transactions can contain other program instructions. The Tokens view composes mint creation, token issuance, transfers and associated account creation. Browser pairing and hardware wallets are outside this release.
 - Devnet airdrops depend on faucet availability and rate limits. Custom development chains must expose compatible Solana RPC methods.
 
 ## Development and verification

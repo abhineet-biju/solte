@@ -238,3 +238,163 @@ async fn token_accounts_and_transfers_work_on_both_programs() {
         );
     }
 }
+
+#[tokio::test]
+#[ignore = "requires an isolated loopback validator; set SOLTE_TEST_RPC and SOLTE_TEST_WS"]
+async fn project_mint_creation_and_issuance_work_on_both_programs() {
+    use solte::mints::{self, CreateMint};
+    let http = std::env::var("SOLTE_TEST_RPC").expect("Set a loopback RPC");
+    let ws = std::env::var("SOLTE_TEST_WS").expect("Set its WebSocket endpoint");
+    assert!(matches!(
+        url::Url::parse(&http).unwrap().host_str(),
+        Some("127.0.0.1" | "localhost" | "[::1]")
+    ));
+    let profile = RpcProfile::custom("Mint test", &http, &ws).unwrap();
+    let rpc = network::client(&profile);
+    let root = tempfile::tempdir().unwrap();
+    let payer = wallet::create(root.path(), "mint-payer").unwrap();
+    let authority = wallet::create(root.path(), "mint-authority").unwrap();
+    let recipient = wallet::create(root.path(), "mint-recipient").unwrap();
+    let wallets = [payer.clone(), authority.clone(), recipient.clone()];
+    let store = Store::open(root.path()).unwrap();
+    let signature = rpc
+        .request_airdrop(&payer.address.parse().unwrap(), 5_000_000_000)
+        .await
+        .unwrap();
+    while !rpc.confirm_transaction(&signature).await.unwrap() {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    send(
+        &rpc,
+        &payer,
+        &[solana_system_interface::instruction::transfer(
+            &payer.address.parse().unwrap(),
+            &authority.address.parse().unwrap(),
+            100_000_000,
+        )],
+        None,
+    )
+    .await;
+    let genesis = rpc.get_genesis_hash().await.unwrap().to_string();
+    for program in [tokens::TOKEN_PROGRAM, tokens::TOKEN_2022] {
+        let program_address = program.parse().unwrap();
+        for (initial_supply, format) in [(0, Format::Legacy), (1_250_000, Format::V0)] {
+            let prepared = mints::prepare_create(
+                &profile,
+                &payer,
+                &wallets,
+                CreateMint {
+                    program: program_address,
+                    decimals: 6,
+                    authority: authority.address.parse().unwrap(),
+                    freeze: (initial_supply > 0).then(|| authority.address.parse().unwrap()),
+                    initial_supply,
+                    format,
+                },
+            )
+            .await
+            .unwrap();
+            let address = prepared.created_mint.as_ref().unwrap().address.clone();
+            submit(prepared, &store).await;
+            let registered = store.mints(&profile.http, &genesis).await.unwrap();
+            let snapshot = mints::fetch(&profile, &genesis, registered).await.unwrap();
+            let mint = snapshot
+                .iter()
+                .find(|mint| mint.record.address == address)
+                .unwrap();
+            assert_eq!(
+                mint.info.as_ref().unwrap()["supply"],
+                initial_supply.to_string()
+            );
+            if initial_supply == 0 {
+                assert!(mint.info.as_ref().unwrap()["freezeAuthority"].is_null());
+            } else {
+                assert_eq!(
+                    mint.info.as_ref().unwrap()["freezeAuthority"],
+                    authority.address
+                );
+            }
+            assert!(mint.can_mint(&wallets));
+            let payer_accounts = tokens::fetch(&rpc, &payer.address.parse().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                payer_accounts
+                    .accounts
+                    .iter()
+                    .find(|a| a.mint == address)
+                    .map(|a| a.amount),
+                if initial_supply == 0 {
+                    None
+                } else {
+                    Some(initial_supply)
+                }
+            );
+            submit(
+                mints::prepare_mint_more(
+                    &profile,
+                    &payer,
+                    &wallets,
+                    &address,
+                    &recipient.address,
+                    "2.5",
+                    Format::V0,
+                )
+                .await
+                .unwrap(),
+                &store,
+            )
+            .await;
+            let accounts = tokens::fetch(&rpc, &recipient.address.parse().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                accounts
+                    .accounts
+                    .iter()
+                    .find(|a| a.mint == address)
+                    .unwrap()
+                    .amount,
+                2_500_000
+            );
+            // Revoked authorities must stop issuance even if the old wallet is loaded.
+            send(
+                &rpc,
+                &authority,
+                &[spl_token_2022_interface::instruction::set_authority(
+                    &program_address,
+                    &address.parse().unwrap(),
+                    None,
+                    spl_token_2022_interface::instruction::AuthorityType::MintTokens,
+                    &authority.address.parse().unwrap(),
+                    &[],
+                )
+                .unwrap()],
+                None,
+            )
+            .await;
+            assert!(
+                mints::prepare_mint_more(
+                    &profile,
+                    &payer,
+                    &wallets,
+                    &address,
+                    &recipient.address,
+                    "1",
+                    Format::Auto
+                )
+                .await
+                .is_err()
+            );
+        }
+    }
+    assert_eq!(
+        Store::open(root.path())
+            .unwrap()
+            .mints(&profile.http, &genesis)
+            .await
+            .unwrap()
+            .len(),
+        4
+    );
+}
