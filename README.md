@@ -20,7 +20,13 @@ Solte is a developer-first, TUI-based Solana wallet built for the terminal.
 
 ## Install
 
-Prebuilt installers are pending the first release. For now, [build from source](docs/releases.md#build-from-source), then run `solte` in your project. macOS and Linux supported.
+Prebuilt binaries are available for macOS and Linux (prerelease).
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/abhineet-biju/solte/releases/download/v0.1.1-dev.3.1.gb206996f0152/solte-installer.sh | sh
+```
+
+Run `solte` in your project.
 
 Try `solte --demo --theme neon` without using real keys.
 
