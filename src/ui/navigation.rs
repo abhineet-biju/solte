@@ -190,6 +190,12 @@ impl Ui {
             Some(Modal::Appearance { kind, selected }) => {
                 Some(Action::SelectAppearance(*kind, *selected))
             }
+            Some(Modal::TokenCreation { selected }) => Some(if *selected == 0 {
+                Action::CreateMint
+            } else {
+                Action::CreateTokenAccount
+            }),
+            Some(Modal::ProjectMints { selected }) => Some(Action::SelectMint(*selected)),
             Some(Modal::Profiles { selected }) => Some(Action::SelectProfile(*selected)),
             Some(Modal::Funding { selected, .. }) => Some(match selected {
                 0 => Action::BrowserFaucet(crate::funding::Faucet::Solana),

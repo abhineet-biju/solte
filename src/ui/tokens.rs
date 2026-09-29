@@ -131,7 +131,7 @@ impl Ui {
             } else if !app.token_filter.is_empty() {
                 "No matching accounts. [x] clears the filter."
             } else if app.token_updated.is_some() || app.demo {
-                "No token accounts yet.\n\nCreate an account for an existing mint with [a]."
+                "No token accounts yet.\n\nCreate a mint or associated account with [c]."
             } else {
                 "Token account discovery has not completed."
             };
@@ -259,8 +259,11 @@ impl Ui {
             .sum::<u16>()
             + 3 * tools.len().saturating_sub(1) as u16;
         let y = inner.bottom() - 1;
-        let mut primary = vec![("Create ATA [a]", Action::CreateTokenAccount)];
-        if !roomy && selected {
+        let mut primary = vec![
+            ("Create [c]", Action::TokenCreation),
+            ("Mints [v]", Action::ProjectMints),
+        ];
+        if !roomy && selected && inner.width >= 80 {
             primary.push(("Send [s]", Action::Send));
         }
         self.token_buttons(
@@ -297,6 +300,8 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             for kind in [
                 crate::app::FormKind::TokenCreate,
+                crate::app::FormKind::MintCreate,
+                crate::app::FormKind::MintMore,
                 crate::app::FormKind::TokenTransfer,
                 crate::app::FormKind::TokenExport,
                 crate::app::FormKind::TokenSearch,
@@ -375,6 +380,55 @@ mod tests {
                 );
             }
             app.modal = None;
+        }
+    }
+    #[test]
+    fn mint_dialogs_keep_actions_separate_and_selection_visible_when_resized() {
+        use crate::app::Modal;
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        demo::populate(&mut app);
+        app.switch_view(View::Tokens);
+        let mut ui = Ui::default();
+        for (width, height) in [(60, 10), (80, 20), (120, 32), (160, 48)] {
+            for selected in [0, 1] {
+                app.modal = Some(Modal::TokenCreation { selected });
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                let chosen = if selected == 0 {
+                    Action::CreateMint
+                } else {
+                    Action::CreateTokenAccount
+                };
+                let hit = ui.hits.iter().find(|hit| hit.action == chosen).unwrap();
+                assert_eq!(
+                    terminal.backend().buffer()[(hit.area.x, hit.area.y)].bg,
+                    crate::ui::theme::Theme::named(&app.config.theme).accent
+                );
+            }
+            app.modal = Some(Modal::Mint {
+                mint: Box::new(app.project_mints[0].clone()),
+                scroll: 0,
+            });
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            for action in [
+                Action::CopyToken(true),
+                Action::ViewMintAccount,
+                Action::ExplorerToken(true),
+                Action::MintMore,
+                Action::CreateTokenAccount,
+                Action::Refresh,
+            ] {
+                assert!(
+                    ui.hits.iter().any(|hit| hit.action == action),
+                    "{width}x{height} {action:?}"
+                );
+            }
+            assert!(
+                ui.hits
+                    .iter()
+                    .all(|hit| hit.area.right() <= width && hit.area.bottom() <= height)
+            );
         }
     }
 }

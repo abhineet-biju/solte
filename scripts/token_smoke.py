@@ -94,11 +94,42 @@ def main():
             send(b"\x1b[<0;4;10M")
             assert b"Token account inspector" in output, "Mouse row selection should open the same inspector"
             send(b"\x1b")
+            send(b"c")
+            assert b"Associated token account" in output, "Create chooser should expose both operations"
+            send(b"\r")
+            assert b"Create token mint" in output
+            for width, height in [(60, 10), (80, 20), (120, 32)]:
+                resize(width, height)
+                for _ in range(6):
+                    send(b"\t")
+                assert process.poll() is None
+            send(b"\x1b")
+            send(b"c")
+            send(b"j\r")
+            assert b"Create associated token account" in output
+            send(b"\x1b")
+            send(b"v")
+            assert b"Project mints" in output
+            send(b"j\r")
+            assert b"Mint more [m]" in output, "Selected project mint should expose issuance"
+            send(b"y")
+            project_mint = clipboard()
+            assert len(project_mint) >= 32
+            send(b"t")
+            send(b"y")
+            assert clipboard() != project_mint, "View account should inspect the active wallet's token account"
+            send(b"m")
+            assert b"Requires a loaded mint authority" in output
+            send(b"\x1b")
+            send(b"c")
+            send(b"\x1b[<0;28;14M")
+            assert b"Create token mint" in output, "Mouse create should open the same mint form"
+            send(b"\x1b")
             send(b"q")
             process.wait(timeout=5)
             assert process.returncode == 0
             assert not (root / ".solte").exists(), "Demo token workflow must not create project wallet data"
-            print("PASS: token selection, copying, filtering, JSON export, forms, mouse, resizing, and exit")
+            print("PASS: token selection, copying, filtering, JSON export, mint creation, project mints, minting, mouse, resizing, and exit")
         finally:
             if process.poll() is None:
                 process.terminate()

@@ -56,6 +56,8 @@ impl Services {
         app.session += 1;
         app.records.clear();
         app.tokens.clear();
+        app.project_mints.clear();
+        app.mint_receipt = None;
         app.token_cursor = 0;
         app.token_loading = false;
         app.token_started = None;
@@ -107,14 +109,20 @@ impl Services {
         let profile = app.profile().clone();
         let session = app.session;
         let sender = self.local_sender.clone();
+        let store = self.store.clone();
         app.token_loading = true;
         app.token_started = Some(Instant::now());
         app.token_error = None;
         self.jobs.spawn(async move {
-            let result =
-                async { crate::tokens::fetch(&network::client(&profile), &owner.parse()?).await }
-                    .await
-                    .map_err(|error| anyhow::anyhow!(network::safe_error(error, &profile)));
+            let result = async {
+                let mut snapshot =
+                    crate::tokens::fetch(&network::client(&profile), &owner.parse()?).await?;
+                let records = store.mints(&profile.http, &snapshot.genesis).await?;
+                snapshot.mints = crate::mints::fetch(&profile, &snapshot.genesis, records).await?;
+                Ok::<_, anyhow::Error>(snapshot)
+            }
+            .await
+            .map_err(|error| anyhow::anyhow!(network::safe_error(error, &profile)));
             let _ = sender.send(LocalEvent::Tokens { session, result }).await;
         });
     }
@@ -255,7 +263,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     },
                     Update::Network(network, balance) => {
                         if app.token_genesis.as_ref().is_some_and(|genesis| *genesis != network.genesis) {
-                            app.tokens.clear(); app.token_cursor = 0; app.token_updated = None;
+                            app.tokens.clear(); app.project_mints.clear(); app.token_cursor = 0; app.token_updated = None;
                             app.token_genesis = None; app.token_error = None; app.token_warnings.clear();
                         }
                         if !matches!(app.refresh, RefreshState::Pending(_)) {
@@ -273,9 +281,15 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 match event.update {
                     OperationUpdate::Prepared(prepared) => { app.busy = None; app.modal = Some(Modal::Review { prepared, scroll: 0 }); ui.animate(&app); },
                     OperationUpdate::Submitted(signature) => { app.last_signature = Some(signature.clone()); app.busy = Some("Waiting for transaction confirmation…".into()); app.log("INFO", format!("Submitted {signature}")); services.command(Command::Refresh); },
-                    OperationUpdate::Finished(signature) => { if app.view == crate::app::View::Tokens { services.load_tokens(&mut app); } app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
+                    OperationUpdate::Finished(signature) => {
+                        if let Some(mut record) = app.mint_receipt.take() {
+                            app.switch_view(crate::app::View::Tokens);
+                            record.signature = signature.clone();
+                            app.modal = Some(Modal::Mint { mint: Box::new(crate::mints::ProjectMint { record, info: None, error: Some("Confirmed. Refreshing mint details…".into()) }), scroll: 0 });
+                        }
+                        if app.view == crate::app::View::Tokens { services.load_tokens(&mut app); } app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Exported(path) => { app.busy = None; app.status = format!("Signed transaction exported to {path} · not submitted"); app.log("INFO", app.status.clone()); },
-                    OperationUpdate::Failed(message) => { app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
+                    OperationUpdate::Failed(message) => { app.mint_receipt = None; if app.view == crate::app::View::Tokens { services.load_tokens(&mut app); } app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
                     OperationUpdate::FundingFailed(message) => {
                         app.busy = None;
                         report_error(&mut app, message.clone());
@@ -348,6 +362,18 @@ fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens:
                 return;
             }
             let selected = app.selected_token().map(|a| a.address.clone());
+            app.project_mints = snapshot.mints;
+            if let Some(Modal::Mint { mint, .. }) = &mut app.modal
+                && let Some(current) = app
+                    .project_mints
+                    .iter()
+                    .find(|item| item.record.address == mint.record.address)
+            {
+                **mint = current.clone();
+            }
+            if let Some(Modal::ProjectMints { selected }) = &mut app.modal {
+                *selected = (*selected).min(app.project_mints.len().saturating_sub(1));
+            }
             app.tokens = snapshot.accounts;
             app.token_genesis = Some(snapshot.genesis);
             app.token_warnings = snapshot.warnings;
@@ -411,6 +437,19 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             Pane::Logs => Action::Follow,
         };
     }
+    if action == Action::Submit {
+        match &app.modal {
+            Some(Modal::TokenCreation { selected }) => {
+                action = if *selected == 0 {
+                    Action::CreateMint
+                } else {
+                    Action::CreateTokenAccount
+                }
+            }
+            Some(Modal::ProjectMints { selected }) => action = Action::SelectMint(*selected),
+            _ => {}
+        }
+    }
     if action == Action::Submit
         && let Some(Modal::Funding { selected, .. }) = &app.modal
     {
@@ -442,6 +481,8 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 | Action::BrowserFaucet(_)
                 | Action::Send
                 | Action::CreateTokenAccount
+                | Action::CreateMint
+                | Action::MintMore
                 | Action::ImportTransaction
                 | Action::Submit
         )
@@ -449,6 +490,69 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         bail!("Wait for the current operation to finish");
     }
     match action {
+        Action::TokenCreation => app.modal = Some(Modal::TokenCreation { selected: 0 }),
+        Action::ProjectMints => app.modal = Some(Modal::ProjectMints { selected: 0 }),
+        Action::SelectMint(index) => {
+            if let Some(mint) = app.project_mints.get(index) {
+                app.modal = Some(Modal::Mint {
+                    mint: Box::new(mint.clone()),
+                    scroll: 0,
+                });
+            }
+        }
+        Action::ViewMintAccount => {
+            let Some(Modal::Mint { mint, .. }) = &app.modal else {
+                bail!("Select a project mint first");
+            };
+            let account = app
+                .tokens
+                .iter()
+                .find(|account| account.mint == mint.record.address)
+                .context(
+                    "No token account for this mint in the active wallet; create an ATA or refresh",
+                )?
+                .clone();
+            app.modal = Some(Modal::Token {
+                account: Box::new(account),
+                scroll: 0,
+            });
+        }
+        Action::CreateMint => {
+            let wallet = app.wallet().context("Select a signing wallet first")?;
+            anyhow::ensure!(!wallet.program, "Program identities are read-only");
+            let owner = wallet.address.clone();
+            app.open_form(FormKind::MintCreate);
+            if let Some(Modal::Form(form)) = &mut app.modal {
+                form.fields[2].insert(&owner);
+            }
+        }
+        Action::MintMore => {
+            anyhow::ensure!(
+                !app.wallet()
+                    .context("Select a signing wallet first")?
+                    .program,
+                "Program identities are read-only"
+            );
+            let owner = app
+                .wallet()
+                .context("Select a signing wallet first")?
+                .address
+                .clone();
+            let mint = match &app.modal {
+                Some(Modal::Mint { mint, .. }) => mint.record.address.clone(),
+                Some(Modal::Token { account, .. }) => account.mint.clone(),
+                _ => app
+                    .selected_token()
+                    .context("Select a token account or project mint first")?
+                    .mint
+                    .clone(),
+            };
+            app.open_form(FormKind::MintMore);
+            if let Some(Modal::Form(form)) = &mut app.modal {
+                form.fields[0].insert(&mint);
+                form.fields[1].insert(&owner);
+            }
+        }
         Action::Send
             if app.view == crate::app::View::Tokens
                 || matches!(app.modal, Some(Modal::Token { .. })) =>
@@ -492,7 +596,9 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 .context("Select a signing wallet first")?
                 .address
                 .clone();
-            let mint = if let Some(Modal::Token { account, .. }) = &app.modal {
+            let mint = if let Some(Modal::Mint { mint, .. }) = &app.modal {
+                Some(mint.record.address.clone())
+            } else if let Some(Modal::Token { account, .. }) = &app.modal {
                 Some(account.mint.clone())
             } else {
                 app.selected_token().map(|a| a.mint.clone())
@@ -515,18 +621,21 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             }
         }
         Action::CopyToken(mint) | Action::ExplorerToken(mint) => {
-            let account = if let Some(Modal::Token { account, .. }) = &app.modal {
-                Some(account.as_ref())
+            let address = if let Some(Modal::Mint { mint, .. }) = &app.modal {
+                mint.record.address.clone()
             } else {
-                app.selected_token()
-            }
-            .context("Select a token account first")?;
-            let address = if mint {
-                &account.mint
-            } else {
-                &account.address
-            }
-            .clone();
+                let account = if let Some(Modal::Token { account, .. }) = &app.modal {
+                    Some(account.as_ref())
+                } else {
+                    app.selected_token()
+                }
+                .context("Select a token account first")?;
+                if mint {
+                    account.mint.clone()
+                } else {
+                    account.address.clone()
+                }
+            };
             if matches!(action, Action::CopyToken(_)) {
                 copy(address.clone())?;
                 app.status = if mint {
@@ -949,6 +1058,7 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                 });
                 bail!("Simulation failed; this transfer cannot be submitted");
             }
+            app.mint_receipt = prepared.created_mint.clone();
             let session = app.session;
             let store = services.store.clone();
             let sender = services.operation_sender.clone();
@@ -1044,6 +1154,97 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                     let _ = sender.send(OperationEvent { session, update }).await;
                 });
             }
+        }
+        FormKind::MintCreate | FormKind::MintMore => {
+            anyhow::ensure!(
+                !services.offline,
+                "Online simulation is required for mint operations"
+            );
+            let wallet = app
+                .wallet()
+                .context("Select a signing wallet first")?
+                .clone();
+            let wallets = app.wallets.clone();
+            let profile = app.profile().clone();
+            let expected_genesis = app.token_genesis.clone();
+            if kind == FormKind::MintMore {
+                anyhow::ensure!(
+                    expected_genesis.is_some()
+                        && expected_genesis.as_deref()
+                            == app.network.as_ref().map(|n| n.genesis.as_str()),
+                    "Network identity changed or unavailable; refresh tokens first"
+                );
+            }
+            let session = app.session;
+            let sender = services.operation_sender.clone();
+            app.busy = Some("Simulating mint operation…".into());
+            services.jobs.spawn(async move {
+                let result = async {
+                    if kind == FormKind::MintCreate {
+                        let decimals: u8 = values[1]
+                            .parse()
+                            .context("Decimals must be an integer from 0 to 255")?;
+                        let initial_supply = if values[4].trim().is_empty() {
+                            0
+                        } else {
+                            crate::tokens::parse_supply(&values[4], decimals)?
+                        };
+                        crate::mints::prepare_create(
+                            &profile,
+                            &wallet,
+                            &wallets,
+                            crate::mints::CreateMint {
+                                program: if values[0] == "Token-2022" {
+                                    crate::tokens::TOKEN_2022
+                                } else {
+                                    crate::tokens::TOKEN_PROGRAM
+                                }
+                                .parse()?,
+                                decimals,
+                                authority: values[2]
+                                    .parse()
+                                    .context("Enter a valid mint authority address")?,
+                                freeze: if values[3].is_empty() {
+                                    None
+                                } else {
+                                    Some(
+                                        values[3]
+                                            .parse()
+                                            .context("Enter a valid freeze authority address")?,
+                                    )
+                                },
+                                initial_supply,
+                                format: values[5].parse()?,
+                            },
+                        )
+                        .await
+                    } else {
+                        crate::mints::prepare_mint_more(
+                            &profile,
+                            &wallet,
+                            &wallets,
+                            &values[0],
+                            &values[1],
+                            &values[2],
+                            values[3].parse()?,
+                        )
+                        .await
+                        .and_then(|prepared| {
+                            anyhow::ensure!(
+                                Some(&prepared.genesis) == expected_genesis.as_ref(),
+                                "Mint belongs to a different network; refresh first"
+                            );
+                            Ok(prepared)
+                        })
+                    }
+                }
+                .await;
+                let update = match result {
+                    Ok(prepared) => OperationUpdate::Prepared(Box::new(prepared)),
+                    Err(error) => OperationUpdate::Failed(network::safe_error(error, &profile)),
+                };
+                let _ = sender.send(OperationEvent { session, update }).await;
+            });
         }
         FormKind::TokenTransfer | FormKind::TokenCreate => {
             if services.offline {
@@ -1179,6 +1380,7 @@ mod tests {
         let snapshot = crate::tokens::Snapshot {
             genesis: network::DEVNET_GENESIS.into(),
             accounts: app.tokens.iter().rev().cloned().collect(),
+            mints: vec![],
             warnings: vec![],
         };
         app.token_loading = true;
@@ -1232,6 +1434,48 @@ mod tests {
             );
             app.modal = None;
         }
+        for action in [
+            Action::TokenCreation,
+            app.key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('c'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap(),
+        ] {
+            handle(&mut app, &mut services, action).await.unwrap();
+            assert!(matches!(
+                app.modal,
+                Some(Modal::TokenCreation { selected: 0 })
+            ));
+            handle(&mut app, &mut services, Action::Submit)
+                .await
+                .unwrap();
+            assert!(
+                matches!(&app.modal, Some(Modal::Form(form)) if form.kind == FormKind::MintCreate && form.fields[2].value == app.wallet().unwrap().address)
+            );
+            app.modal = None;
+        }
+        handle(&mut app, &mut services, Action::ProjectMints)
+            .await
+            .unwrap();
+        handle(&mut app, &mut services, Action::Submit)
+            .await
+            .unwrap();
+        assert!(matches!(app.modal, Some(Modal::Mint { .. })));
+        handle(&mut app, &mut services, Action::ViewMintAccount)
+            .await
+            .unwrap();
+        assert!(matches!(app.modal, Some(Modal::Token { .. })));
+        handle(&mut app, &mut services, Action::SelectMint(0))
+            .await
+            .unwrap();
+        handle(&mut app, &mut services, Action::MintMore)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.modal, Some(Modal::Form(form)) if form.kind == FormKind::MintMore && !form.fields[0].value.is_empty() && form.fields[1].value == app.wallet().unwrap().address)
+        );
+        app.modal = None;
         handle(&mut app, &mut services, Action::CreateTokenAccount)
             .await
             .unwrap();

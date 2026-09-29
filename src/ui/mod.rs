@@ -78,7 +78,8 @@ impl Ui {
         }
         app.modal_scroll_limit = self.modal_scroll_limit;
         if let Some(
-            Modal::Token { scroll, .. }
+            Modal::Mint { scroll, .. }
+            | Modal::Token { scroll, .. }
             | Modal::Log { scroll, .. }
             | Modal::Wallet { scroll, .. }
             | Modal::Inspect { scroll, .. }
@@ -1247,6 +1248,7 @@ impl Ui {
         let screen = frame.area();
         let modal = app.modal.as_ref().unwrap();
         let height = match modal {
+            Modal::TokenCreation { .. } => 8,
             Modal::Appearance { .. } => 10,
             Modal::Funding { .. } => 15,
             Modal::Form(form) => (form.fields.len() * 3 + 10) as u16,
@@ -1276,6 +1278,9 @@ impl Ui {
             Modal::Form(form) => form.title(),
             Modal::Profiles { .. } => "RPC profiles",
             Modal::Token { .. } => "Token account inspector",
+            Modal::Mint { .. } => "Mint inspector",
+            Modal::ProjectMints { .. } => "Project mints",
+            Modal::TokenCreation { .. } => "Create",
             Modal::Log { .. } => "Log details",
             Modal::Wallet { .. } => "Wallet details",
             Modal::Inspect { .. } => "Transaction inspector",
@@ -1300,11 +1305,135 @@ impl Ui {
         frame.render_widget(block, area);
         self.target(Rect::new(area.right() - 10, area.y, 9, 1), Action::Close);
         match modal {
+            Modal::TokenCreation { selected } => {
+                for (index, (label, action)) in [
+                    ("Token mint", Action::CreateMint),
+                    ("Associated token account", Action::CreateTokenAccount),
+                ]
+                .iter()
+                .enumerate()
+                {
+                    self.button(
+                        frame,
+                        Rect::new(inner.x, inner.y + index as u16 * 2, inner.width, 1),
+                        label,
+                        action.clone(),
+                        theme,
+                        index == *selected,
+                    );
+                }
+            }
+            Modal::ProjectMints { selected } => {
+                if app.project_mints.is_empty() {
+                    frame.render_widget(Paragraph::new("No project mints yet. Create one with [c] in Tokens.\nMints are remembered on this RPC and network, across project wallets.").wrap(Wrap { trim: false }), inner);
+                } else {
+                    let count = inner.height.saturating_sub(2).max(1) as usize;
+                    let offset = selected.saturating_sub(count - 1);
+                    for (row, (index, mint)) in app
+                        .project_mints
+                        .iter()
+                        .enumerate()
+                        .skip(offset)
+                        .take(count)
+                        .enumerate()
+                    {
+                        let label = format!(
+                            "{} · {} · {} decimals · {}",
+                            short(&mint.record.address),
+                            if mint.record.program == crate::tokens::TOKEN_2022 {
+                                "Token-2022"
+                            } else {
+                                "SPL Token"
+                            },
+                            mint.record.decimals,
+                            if mint.info.is_some() {
+                                "Ready"
+                            } else {
+                                "Unavailable"
+                            }
+                        );
+                        self.button(
+                            frame,
+                            Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
+                            &label,
+                            Action::SelectMint(index),
+                            theme,
+                            index == *selected,
+                        );
+                    }
+                    frame.render_widget(
+                        Paragraph::new("[j]/[k] Select · [Enter] Inspect · [r] Refresh")
+                            .style(Style::default().fg(theme.muted)),
+                        Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+                    );
+                }
+            }
+            Modal::Mint { mint, scroll } => {
+                let body = Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height.saturating_sub(2),
+                );
+                self.inspection_body(frame, body, mint.lines(), *scroll, theme);
+                let mut actions = vec![("Create ATA [a]", Action::CreateTokenAccount)];
+                if app
+                    .tokens
+                    .iter()
+                    .any(|account| account.mint == mint.record.address)
+                {
+                    actions.insert(0, ("View account [t]", Action::ViewMintAccount));
+                }
+                if mint.can_mint(&app.wallets) {
+                    actions.insert(0, ("Mint more [m]", Action::MintMore));
+                }
+                self.token_buttons(
+                    frame,
+                    Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
+                    &actions,
+                    theme,
+                );
+                self.token_buttons(
+                    frame,
+                    Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+                    &[
+                        ("Copy mint [y]", Action::CopyToken(true)),
+                        ("Explorer [o]", Action::ExplorerToken(true)),
+                        ("Refresh [r]", Action::Refresh),
+                    ],
+                    theme,
+                );
+            }
             Modal::Token { account, scroll } => {
-                self.inspection_body(frame, inner, account.lines(), *scroll, theme);
+                let body = Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height.saturating_sub(2),
+                );
+                self.inspection_body(frame, body, account.lines(), *scroll, theme);
+                let mut primary = vec![("Send [s]", Action::Send)];
+                if account
+                    .mint_info
+                    .as_ref()
+                    .and_then(|info| info["mintAuthority"].as_str())
+                    .is_some_and(|authority| {
+                        app.wallets
+                            .iter()
+                            .any(|wallet| !wallet.program && wallet.address == authority)
+                    })
+                {
+                    primary.push(("Mint more [m]", Action::MintMore));
+                }
+                self.token_buttons(
+                    frame,
+                    Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
+                    &primary,
+                    theme,
+                );
                 let actions = [
                     ("Copy [y]", Action::CopyToken(false)),
-                    ("Mint [M]", Action::CopyToken(true)),
+                    ("Copy mint [M]", Action::CopyToken(true)),
                     ("JSON [E]", Action::ExportToken),
                     ("Explorer [o]", Action::ExplorerToken(false)),
                 ];
@@ -1489,6 +1618,8 @@ impl Ui {
                     crate::app::FormKind::Profile => {
                         "Profiles are stored locally in .solte/config.toml."
                     }
+                    crate::app::FormKind::MintCreate => "No extensions. Blank freeze authority disables freezing. Initial supply goes to the active wallet; its authority must be loaded.",
+                    crate::app::FormKind::MintMore => "Requires a loaded mint authority. Amount uses mint decimals. Recipient's associated account is created if missing.",
                     crate::app::FormKind::TokenCreate => "Creates the recipient wallet’s associated account for this mint. Payer covers rent.",
                     crate::app::FormKind::TokenTransfer => "Amount uses mint decimals. Wallet destinations create an ATA if missing; explicit token accounts must already exist.",
                     crate::app::FormKind::TokenExport => "Exports public account data only. Existing files are never overwritten.",
@@ -1801,6 +1932,12 @@ impl Ui {
                     "[/] Filter by mint/account/program/state/delegate; [x] clears",
                     "[r] Refresh selected wallet's token accounts",
                     "[s] Review token transfer   [a] Create associated account",
+                    "[c] Create menu: token mint or associated account",
+                    "[v] Project mints, including zero-supply mints without accounts",
+                    "Inspector: [m] Mint more when its authority is loaded",
+                    "Mint inspector: [t] View active wallet’s token account",
+                    "Mint creation: program, decimals, authorities, initial supply",
+                    "Mint authority can be a different loaded project wallet.",
                     "Transfer destination: wallet/create ATA or explicit token account",
                     "Transfer-affecting Token-2022 extensions are inspectable only.",
                     "Token amounts use exact integers; empty accounts remain visible.",

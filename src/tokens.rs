@@ -31,6 +31,7 @@ pub struct TokenAccount {
 pub struct Snapshot {
     pub genesis: String,
     pub accounts: Vec<TokenAccount>,
+    pub mints: Vec<crate::mints::ProjectMint>,
     pub warnings: Vec<String>,
 }
 
@@ -57,6 +58,12 @@ pub fn format_amount(amount: u64, decimals: u8) -> String {
 }
 
 pub fn parse_amount(value: &str, decimals: u8) -> Result<u64> {
+    let amount = parse_supply(value, decimals)?;
+    ensure!(amount > 0, "Amount must be greater than zero");
+    Ok(amount)
+}
+
+pub fn parse_supply(value: &str, decimals: u8) -> Result<u64> {
     let (whole, fraction) = value.trim().split_once('.').unwrap_or((value.trim(), ""));
     ensure!(
         !whole.is_empty()
@@ -66,11 +73,14 @@ pub fn parse_amount(value: &str, decimals: u8) -> Result<u64> {
         "Enter an exact amount with at most {decimals} decimal places"
     );
     let digits = format!("{whole}{fraction:0<width$}", width = usize::from(decimals));
-    let amount: u64 = digits
-        .trim_start_matches('0')
-        .parse()
-        .context("Amount must be positive and fit the token's raw u64 balance")?;
-    ensure!(amount > 0, "Amount must be greater than zero");
+    let significant = digits.trim_start_matches('0');
+    let amount: u64 = if significant.is_empty() {
+        "0"
+    } else {
+        significant
+    }
+    .parse()
+    .context("Amount must be positive and fit the token's raw u64 balance")?;
     Ok(amount)
 }
 
@@ -347,6 +357,7 @@ pub async fn fetch(rpc: &RpcClient, owner: &Pubkey) -> Result<Snapshot> {
     Ok(Snapshot {
         genesis,
         accounts,
+        mints: vec![],
         warnings,
     })
 }
@@ -430,5 +441,16 @@ mod tests {
         let copy: TokenAccount = serde_json::from_slice(&before).unwrap();
         assert_eq!(copy.address, account.address);
         assert_eq!(copy.amount, account.amount);
+    }
+    #[test]
+    fn initial_supply_allows_exact_zero_without_allowing_zero_transfers() {
+        for value in ["0", "0.0", "00.000000"] {
+            assert_eq!(parse_supply(value, 6).unwrap(), 0);
+            assert!(parse_amount(value, 6).is_err());
+        }
+        for value in ["-1", "1e6", ".", "0.0000001", "18446744073709551616"] {
+            assert!(parse_supply(value, 6).is_err());
+        }
+        assert_eq!(parse_supply("1.25", 6).unwrap(), 1_250_000);
     }
 }

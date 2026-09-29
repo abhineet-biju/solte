@@ -82,4 +82,23 @@ pub fn populate(app: &mut App) {
     ] {
         app.push_log(LogEntry::new(level, message));
     }
+    app.project_mints = app
+        .tokens
+        .iter()
+        .map(|account| crate::mints::ProjectMint {
+            record: crate::mints::MintRecord {
+                address: account.mint.clone(),
+                program: account.program.clone(),
+                decimals: account.decimals,
+                creator: account.authority.clone(),
+                signature: String::new(),
+            },
+            info: account.mint_info.clone(),
+            error: None,
+        })
+        .collect();
+    app.project_mints
+        .sort_by(|a, b| a.record.address.cmp(&b.record.address));
+    app.project_mints
+        .dedup_by(|a, b| a.record.address == b.record.address);
 }

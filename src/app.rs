@@ -126,6 +126,8 @@ pub enum FormKind {
     TokenExport,
     TokenCreate,
     TokenTransfer,
+    MintCreate,
+    MintMore,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +151,12 @@ pub enum Action {
     ExplorerToken(bool),
     ExportToken,
     CreateTokenAccount,
+    TokenCreation,
+    CreateMint,
+    ProjectMints,
+    SelectMint(usize),
+    MintMore,
+    ViewMintAccount,
     CopyLog,
     SelectTransaction(usize),
     New,
@@ -285,6 +293,23 @@ impl Form {
                 Field::new("HTTP RPC endpoint", "http://127.0.0.1:8899"),
                 Field::new("WebSocket endpoint", "ws://127.0.0.1:8900"),
             ],
+            FormKind::MintCreate => vec![
+                Field::choice(
+                    "Token program · [←]/[→] choose",
+                    &["SPL Token", "Token-2022"],
+                ),
+                Field::new("Decimals", "6"),
+                Field::new("Mint authority address", ""),
+                Field::new("Freeze authority · blank disables", ""),
+                Field::new("Initial supply · tokens", "0"),
+                Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
+            ],
+            FormKind::MintMore => vec![
+                Field::new("Mint address", ""),
+                Field::new("Recipient wallet address", ""),
+                Field::new("Amount · tokens", ""),
+                Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
+            ],
             FormKind::TokenCreate => vec![
                 Field::new("Mint address", ""),
                 Field::new("Recipient wallet address", ""),
@@ -327,6 +352,8 @@ impl Form {
             FormKind::TokenExport => "Export token account",
             FormKind::TokenCreate => "Create associated token account",
             FormKind::TokenTransfer => "Send tokens",
+            FormKind::MintCreate => "Create token mint",
+            FormKind::MintMore => "Mint tokens",
         }
     }
     pub fn submit_label(&self) -> &'static str {
@@ -337,7 +364,10 @@ impl Form {
             FormKind::Transfer | FormKind::TransactionImport => "Simulate & review",
             FormKind::Profile => "Save profile",
             FormKind::TokenExport => "Export JSON",
-            FormKind::TokenCreate | FormKind::TokenTransfer => "Simulate & review",
+            FormKind::TokenCreate
+            | FormKind::TokenTransfer
+            | FormKind::MintCreate
+            | FormKind::MintMore => "Simulate & review",
             FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch => "Apply filter",
         }
     }
@@ -437,6 +467,16 @@ impl Appearance {
 }
 
 pub enum Modal {
+    TokenCreation {
+        selected: usize,
+    },
+    ProjectMints {
+        selected: usize,
+    },
+    Mint {
+        mint: Box<crate::mints::ProjectMint>,
+        scroll: u16,
+    },
     Token {
         account: Box<crate::tokens::TokenAccount>,
         scroll: u16,
@@ -497,6 +537,8 @@ pub struct App {
     pub focused_control: Option<Action>,
     pub selector_focus: bool,
     pub tokens: Vec<crate::tokens::TokenAccount>,
+    pub project_mints: Vec<crate::mints::ProjectMint>,
+    pub mint_receipt: Option<crate::mints::MintRecord>,
     pub token_cursor: usize,
     pub token_export: Option<crate::tokens::TokenAccount>,
     pub token_operation: Option<crate::tokens::TokenAccount>,
@@ -553,6 +595,8 @@ impl App {
             focused_control: None,
             selector_focus: false,
             tokens: vec![],
+            project_mints: vec![],
+            mint_receipt: None,
             token_export: None,
             token_operation: None,
             token_cursor: 0,
@@ -831,7 +875,11 @@ impl App {
                 KeyCode::Tab
                     if matches!(
                         modal,
-                        Modal::Funding { .. } | Modal::Appearance { .. } | Modal::Profiles { .. }
+                        Modal::Funding { .. }
+                            | Modal::Appearance { .. }
+                            | Modal::Profiles { .. }
+                            | Modal::TokenCreation { .. }
+                            | Modal::ProjectMints { .. }
                     ) =>
                 {
                     Some(Action::Scroll(1))
@@ -839,7 +887,11 @@ impl App {
                 KeyCode::BackTab
                     if matches!(
                         modal,
-                        Modal::Funding { .. } | Modal::Appearance { .. } | Modal::Profiles { .. }
+                        Modal::Funding { .. }
+                            | Modal::Appearance { .. }
+                            | Modal::Profiles { .. }
+                            | Modal::TokenCreation { .. }
+                            | Modal::ProjectMints { .. }
                     ) =>
                 {
                     Some(Action::Scroll(-1))
@@ -853,6 +905,27 @@ impl App {
                 KeyCode::Char('3') if matches!(modal, Modal::Funding { .. }) => {
                     Some(Action::RpcAirdrop)
                 }
+                KeyCode::Char('t') if matches!(modal, Modal::Mint { .. }) => {
+                    Some(Action::ViewMintAccount)
+                }
+                KeyCode::Char('r')
+                    if matches!(modal, Modal::Mint { .. } | Modal::ProjectMints { .. }) =>
+                {
+                    Some(Action::Refresh)
+                }
+                KeyCode::Char('m') if matches!(modal, Modal::Token { .. } | Modal::Mint { .. }) => {
+                    Some(Action::MintMore)
+                }
+                KeyCode::Char('y' | 'M') if matches!(modal, Modal::Mint { .. }) => {
+                    Some(Action::CopyToken(true))
+                }
+                KeyCode::Char('o' | 'O') if matches!(modal, Modal::Mint { .. }) => {
+                    Some(Action::ExplorerToken(true))
+                }
+                KeyCode::Char('a') if matches!(modal, Modal::Mint { .. }) => {
+                    Some(Action::CreateTokenAccount)
+                }
+                KeyCode::Enter if matches!(modal, Modal::Mint { .. }) => Some(Action::Close),
                 KeyCode::Char('s') if matches!(modal, Modal::Token { .. }) => Some(Action::Send),
                 KeyCode::Char('a') if matches!(modal, Modal::Token { .. }) => {
                     Some(Action::CreateTokenAccount)
@@ -916,6 +989,9 @@ impl App {
             )),
             KeyCode::Char('l' | 'L') => Some(Action::Navigate(Direction::Right)),
             KeyCode::Enter => Some(Action::Activate),
+            KeyCode::Char('c') if self.view == View::Tokens => Some(Action::TokenCreation),
+            KeyCode::Char('v') if self.view == View::Tokens => Some(Action::ProjectMints),
+            KeyCode::Char('m') if self.view == View::Tokens => Some(Action::MintMore),
             KeyCode::Char('a') if self.view == View::Tokens => Some(Action::CreateTokenAccount),
             KeyCode::Char('n') => Some(Action::New),
             KeyCode::Char('i') => Some(Action::Import),
@@ -991,6 +1067,12 @@ impl App {
                 }
             },
             Action::Scroll(delta) => match &mut self.modal {
+                Some(Modal::TokenCreation { selected }) => {
+                    *selected = move_index(*selected, delta, 2)
+                }
+                Some(Modal::ProjectMints { selected }) => {
+                    *selected = move_index(*selected, delta, self.project_mints.len())
+                }
                 Some(Modal::Appearance { kind, selected }) => {
                     *selected = move_index(*selected, delta, kind.choices().len());
                 }
@@ -1004,7 +1086,8 @@ impl App {
                     *selected = move_index(*selected, delta, self.config.profiles.len())
                 }
                 Some(
-                    Modal::Token { scroll, .. }
+                    Modal::Mint { scroll, .. }
+                    | Modal::Token { scroll, .. }
                     | Modal::Log { scroll, .. }
                     | Modal::Wallet { scroll, .. }
                     | Modal::Inspect { scroll, .. }

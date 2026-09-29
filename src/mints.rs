@@ -61,6 +61,9 @@ impl ProjectMint {
             lines.push(format!("Creation signature {}", self.record.signature));
         }
         lines
+            .into_iter()
+            .map(|line| crate::model::clean_text(&line))
+            .collect()
     }
 }
 
@@ -178,7 +181,9 @@ pub async fn prepare_create(
     )
     .await?;
     prepared.mint_signer = Some(signer);
-    if let Some(authority) = authority {
+    if let Some(authority) = authority
+        && authority.address != payer.address
+    {
         prepared.extra_wallets.push(authority);
     }
     prepared.created_mint = Some(MintRecord {
@@ -285,7 +290,9 @@ pub async fn prepare_mint_more(
     ];
     let mut prepared =
         token_operations::prepare(profile, payer, &rpc, &genesis, &instructions, format).await?;
-    prepared.extra_wallets.push(signer);
+    if signer.address != payer.address {
+        prepared.extra_wallets.push(signer);
+    }
     prepared.summary = vec![
         "Mint tokens · MintToChecked".into(),
         format!("Mint       {mint}"),
