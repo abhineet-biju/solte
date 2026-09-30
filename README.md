@@ -11,7 +11,8 @@ Solte is a terminal-based Solana wallet built for developers.
 - *Project-aware wallets*: Discover existing Solana and Anchor keypairs when you run `solte` in a project.
 - *Multiple test identities*: Create, import, and switch wallets. You can also inspect/copy any wallet.
 - *Development networks*: Use Devnet, Localnet, or custom RPC profiles, with funding options available directly in the terminal.
-- *Token account tools*: Inspect SPL Token and Token-2022 accounts, copy/export public details, create test mints and associated accounts, issue test balances, and review token transfers.
+- *Token account tools*: Inspect SPL Token and Token-2022 accounts, copy/export public details, create associated accounts, and review token transfers.
+- *Test token minting*: Create SPL Token or Token-2022 mints, track them in your project, and issue tokens to test wallets.
 - *Legacy, v0, and v1 support*: Choose a transfer format or import an existing transaction with automatic format detection and lookup-table resolution.
 - *Review before signing*: Inspect simulation errors, fees, resource limits, accounts, and instructions before submitting.
 - *Partial signing*: Preserve co-signatures and export signed transactions without broadcasting them.
