@@ -180,13 +180,7 @@ Current limits:
 
 ## Development and verification
 
-```sh
-cargo fmt --check
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked
-python3 scripts/terminal_smoke.py
-```
+Follow the [local application and release checks](releases.md#validate-packaging-locally) for test dependencies and the complete check commands.
 
 The regular tests cover exact amount parsing, file protection, project discovery, history isolation and paging, layout bounds, input handling, modal mouse isolation, and mocked RPC behavior. The terminal smoke test creates disposable wallets through both keyboard and mouse input.
 
@@ -195,14 +189,14 @@ To verify real funding and transfers, run an isolated local validator and provid
 ```sh
 SOLTE_TEST_RPC=http://127.0.0.1:8899 \
 SOLTE_TEST_WS=ws://127.0.0.1:8900 \
-cargo test --test localnet -- --ignored
+cargo test --locked --test localnet -- --ignored
 
 python3 scripts/terminal_smoke.py \
   --local-rpc http://127.0.0.1:8899 \
   --local-ws ws://127.0.0.1:8900
 ```
 
-These checks only accept loopback RPC endpoints and create disposable keypairs. The terminal test also requires `solana-keygen` on PATH. The CI workflow runs the regular checks and offline terminal smoke test on macOS and Linux.
+These checks only accept loopback RPC endpoints and create disposable keypairs. The terminal test also requires `solana-keygen` on PATH. Validator tests are opt-in; regular CI runs Rust tests, Clippy, and both wallet and token terminal smoke tests on macOS and Linux.
 
 The source is organized around wallet operations, network monitoring, local storage, application state, rendering, and runtime coordination. Rendering does no network or disk I/O. A session identifier prevents stale responses from updating a newly selected wallet or profile.
 
@@ -235,7 +229,7 @@ V1 requires support on the selected RPC and validator. Unsupported-format errors
 ```sh
 SOLTE_TEST_RPC=http://127.0.0.1:18899 \
 SOLTE_TEST_WS=ws://127.0.0.1:18900 \
-cargo test --test localnet -- --ignored
+cargo test --locked --test localnet -- --ignored
 
 python3 scripts/terminal_smoke.py --binary target/release/solte --format v1 \
   --local-rpc http://127.0.0.1:18899 --local-ws ws://127.0.0.1:18900

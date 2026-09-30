@@ -1,117 +1,45 @@
-use std::sync::{Arc, Mutex};
+mod support;
 
 use serde_json::{Value, json};
 use solte::{
-    config::RpcProfile,
     network::{MAINNET_GENESIS, client, verify_development_network},
     operations, wallet,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    task::JoinHandle,
-};
-
-struct MockRpc {
-    profile: RpcProfile,
-    requests: Arc<Mutex<Vec<Value>>>,
-    task: JoinHandle<()>,
-}
-
-impl Drop for MockRpc {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
+use support::MockRpc;
 
 async fn server(genesis: &'static str) -> MockRpc {
     server_with_version(genesis, json!("legacy")).await
 }
 
 async fn server_with_version(genesis: &'static str, version: Value) -> MockRpc {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let saved = requests.clone();
-    let task = tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let saved = saved.clone();
-            let version = version.clone();
-            tokio::spawn(async move {
-                let mut data = Vec::new();
-                let mut buffer = [0u8; 4096];
-                let (header, length) = loop {
-                    let count = socket.read(&mut buffer).await.unwrap();
-                    if count == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&buffer[..count]);
-                    if let Some(header) = data.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let length = String::from_utf8_lossy(&data[..header])
-                            .lines()
-                            .find_map(|line| {
-                                line.to_lowercase()
-                                    .strip_prefix("content-length:")
-                                    .and_then(|s| s.trim().parse::<usize>().ok())
-                            })
-                            .unwrap();
-                        break (header + 4, length);
-                    }
-                };
-                while data.len() < header + length {
-                    let count = socket.read(&mut buffer).await.unwrap();
-                    if count == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&buffer[..count]);
-                }
-                let request: Value =
-                    serde_json::from_slice(&data[header..header + length]).unwrap();
-                saved.lock().unwrap().push(request.clone());
-                let value = match request["method"].as_str().unwrap() {
-                    "getGenesisHash" => json!(genesis),
-                    "getTransaction" => json!({
-                        "slot": 42, "blockTime": 1, "version": version,
-                        "transaction": {"signatures": [request["params"][0]], "message": {
-                            "accountKeys": [{"pubkey":"11111111111111111111111111111111","writable":true,"signer":true,"source":"transaction"}],
-                            "recentBlockhash":"11111111111111111111111111111111", "instructions":[],
-                            "transactionConfig":{"computeUnitLimit":1000,"loadedAccountsDataSizeLimit":32768}
-                        }},
-                        "meta":{"err":null,"status":{"Ok":null},"fee":5000,"preBalances":[10000],"postBalances":[5000],"logMessages":["Program success"]}
-                    }),
-                    "getBlockHeight" => json!(201),
-                    "getVersion" => json!({"solana-core":"3.1.0","feature-set":1}),
-                    "getLatestBlockhash" => {
-                        json!({"context":{"slot":1},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":200}})
-                    }
-                    "simulateTransaction" => {
-                        json!({"context":{"slot":1},"value":{"err":null,"logs":["Program success"],"accounts":null,"unitsConsumed":150}})
-                    }
-                    "getFeeForMessage" => json!({"context":{"slot":1},"value":5000}),
-                    "requestAirdrop" => Value::Null,
-                    method => panic!("Unexpected RPC method: {method}"),
-                };
-                let body = if request["method"] == "requestAirdrop" {
-                    json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32603,"message":"Faucet rate limit reached"}})
-                } else { json!({"jsonrpc":"2.0","id":request["id"],"result":value}) }.to_string();
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                socket.write_all(response.as_bytes()).await.unwrap();
-            });
-        }
-    });
-    MockRpc {
-        profile: RpcProfile::custom(
-            "mock",
-            &format!("http://127.0.0.1:{port}"),
-            &format!("ws://127.0.0.1:{port}"),
-        )
-        .unwrap(),
-        requests,
-        task,
-    }
+    MockRpc::start(move |request| {
+        let value = match request["method"].as_str().unwrap() {
+            "getGenesisHash" => json!(genesis),
+            "getTransaction" => json!({
+                "slot": 42, "blockTime": 1, "version": version,
+                "transaction": {"signatures": [request["params"][0]], "message": {
+                    "accountKeys": [{"pubkey":"11111111111111111111111111111111","writable":true,"signer":true,"source":"transaction"}],
+                    "recentBlockhash":"11111111111111111111111111111111", "instructions":[],
+                    "transactionConfig":{"computeUnitLimit":1000,"loadedAccountsDataSizeLimit":32768}
+                }},
+                "meta":{"err":null,"status":{"Ok":null},"fee":5000,"preBalances":[10000],"postBalances":[5000],"logMessages":["Program success"]}
+            }),
+            "getBlockHeight" => json!(201),
+            "getVersion" => json!({"solana-core":"3.1.0","feature-set":1}),
+            "getLatestBlockhash" => {
+                json!({"context":{"slot":1},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":200}})
+            }
+            "simulateTransaction" => {
+                json!({"context":{"slot":1},"value":{"err":null,"logs":["Program success"],"accounts":null,"unitsConsumed":150}})
+            }
+            "getFeeForMessage" => json!({"context":{"slot":1},"value":5000}),
+            "requestAirdrop" => Value::Null,
+            method => panic!("Unexpected RPC method: {method}"),
+        };
+        if request["method"] == "requestAirdrop" {
+            json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32603,"message":"Faucet rate limit reached"}})
+        } else { json!({"jsonrpc":"2.0","id":request["id"],"result":value}) }
+    }).await
 }
 
 #[tokio::test]

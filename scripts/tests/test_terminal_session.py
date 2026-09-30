@@ -43,13 +43,17 @@ os.read(0, 1)
             terminal.process.wait(timeout=5)
             self.assertEqual(terminal.process.returncode, 0)
 
-    def test_timeout_saves_the_visible_screen_for_diagnosis(self):
+    def test_timeouts_and_assertions_save_terminal_state(self):
         child = "import os, time; os.write(1, b'Ready'); time.sleep(30)"
-        with tempfile.TemporaryDirectory() as temporary:
-            with TerminalSession([sys.executable, "-u", "-c", child], 40, 6, artifact_dir=temporary) as terminal:
-                terminal.wait_text("Ready")
-                with self.assertRaisesRegex(AssertionError, "Visible screen:"):
-                    terminal.wait_text("Missing", timeout=0.1)
+        for failure in ["timeout", "assertion"]:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                with self.assertRaisesRegex(AssertionError, "Visible screen:" if failure == "timeout" else "Missing"):
+                    with TerminalSession([sys.executable, "-u", "-c", child], 40, 6, artifact_dir=temporary) as terminal:
+                        terminal.wait_text("Ready")
+                        if failure == "timeout":
+                            terminal.wait_text("Missing", timeout=0.1)
+                        else:
+                            self.assertIn("Missing", terminal.text)
                 self.assertIn("Ready", (Path(temporary) / "screen.txt").read_text())
                 self.assertIn(b"Ready", (Path(temporary) / "terminal.ansi").read_bytes())
 

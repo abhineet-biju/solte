@@ -1,144 +1,70 @@
-use std::sync::{Arc, Mutex};
+mod support;
 
 use serde_json::{Value, json};
-use solte::{
-    app::App,
-    config::{Config, RpcProfile},
-    demo, network, tokens,
-};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    task::JoinHandle,
-};
+use solte::{app::App, config::Config, demo, network, tokens};
+use support::MockRpc;
 
-struct Server {
-    profile: RpcProfile,
-    requests: Arc<Mutex<Vec<Value>>>,
-    task: JoinHandle<()>,
-}
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-async fn server(partial: bool) -> Server {
+async fn server(partial: bool) -> MockRpc {
     server_on_network(partial, network::DEVNET_GENESIS).await
 }
 
-async fn server_on_network(partial: bool, genesis: &'static str) -> Server {
+async fn server_on_network(partial: bool, genesis: &'static str) -> MockRpc {
     let mut app = App::new("/fixture".into(), Config::default(), vec![]);
     demo::populate(&mut app);
-    let accounts = Arc::new(app.tokens);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let requests = Arc::new(Mutex::new(vec![]));
-    let saved = requests.clone();
-    let task = tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let saved = saved.clone();
-            let accounts = accounts.clone();
-            tokio::spawn(async move {
-                let mut data = Vec::new();
-                let mut buffer = [0; 4096];
-                let (header, length) = loop {
-                    let count = socket.read(&mut buffer).await.unwrap();
-                    if count == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&buffer[..count]);
-                    if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let length = String::from_utf8_lossy(&data[..end])
-                            .lines()
-                            .find_map(|line| {
-                                line.to_lowercase()
-                                    .strip_prefix("content-length:")
-                                    .and_then(|v| v.trim().parse::<usize>().ok())
-                            })
-                            .unwrap();
-                        break (end + 4, length);
-                    }
+    let accounts = app.tokens;
+    MockRpc::start(move |request| {
+        let result = match request["method"].as_str().unwrap() {
+            "getGenesisHash" => json!(genesis),
+            "getTokenAccountsByOwner" => {
+                json!({"context":{"slot":42},"value": accounts.iter()
+                .filter(|a| a.program == request["params"][1]["programId"])
+                .map(|a| json!({"pubkey":a.address,"account":a.account})).collect::<Vec<_>>()})
+            }
+            "getMultipleAccounts" => {
+                json!({"context":{"slot":42},"value":request["params"][0].as_array().unwrap().iter()
+                .map(|mint| { let a = accounts.iter().find(|a| a.mint == *mint).unwrap();
+                    json!({"owner":a.program,"data":{"parsed":{"type":"mint","info":a.mint_info}}}) }).collect::<Vec<_>>()})
+            }
+            "getAccountInfo" => {
+                let address = request["params"][0].as_str().unwrap();
+                let value = if let Some(a) = accounts.iter().find(|a| a.address == address)
+                {
+                    a.account.clone()
+                } else if let Some(a) = accounts.iter().find(|a| a.mint == address) {
+                    json!({"owner":a.program,"data":{"parsed":{"type":"mint","info":a.mint_info}}})
+                } else {
+                    Value::Null
                 };
-                while data.len() < header + length {
-                    let count = socket.read(&mut buffer).await.unwrap();
-                    if count == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&buffer[..count]);
-                }
-                let request: Value =
-                    serde_json::from_slice(&data[header..header + length]).unwrap();
-                saved.lock().unwrap().push(request.clone());
-                let result = match request["method"].as_str().unwrap() {
-                    "getGenesisHash" => json!(genesis),
-                    "getTokenAccountsByOwner" => {
-                        json!({"context":{"slot":42},"value": accounts.iter()
-                        .filter(|a| a.program == request["params"][1]["programId"])
-                        .map(|a| json!({"pubkey":a.address,"account":a.account})).collect::<Vec<_>>()})
-                    }
-                    "getMultipleAccounts" => {
-                        json!({"context":{"slot":42},"value":request["params"][0].as_array().unwrap().iter()
-                        .map(|mint| { let a = accounts.iter().find(|a| a.mint == *mint).unwrap();
-                            json!({"owner":a.program,"data":{"parsed":{"type":"mint","info":a.mint_info}}}) }).collect::<Vec<_>>()})
-                    }
-                    "getAccountInfo" => {
-                        let address = request["params"][0].as_str().unwrap();
-                        let value = if let Some(a) = accounts.iter().find(|a| a.address == address)
-                        {
-                            a.account.clone()
-                        } else if let Some(a) = accounts.iter().find(|a| a.mint == address) {
-                            json!({"owner":a.program,"data":{"parsed":{"type":"mint","info":a.mint_info}}})
-                        } else {
-                            Value::Null
-                        };
-                        json!({"context":{"slot":42},"value":value})
-                    }
-                    "getBlockHeight" => json!(43),
-                    "sendTransaction" => {
-                        use base64::Engine;
-                        let bytes = base64::engine::general_purpose::STANDARD
-                            .decode(request["params"][0].as_str().unwrap())
-                            .unwrap();
-                        let tx: solana_transaction::versioned::VersionedTransaction =
-                            wincode::deserialize(&bytes).unwrap();
-                        tx.verify_and_hash_message().unwrap();
-                        json!(tx.signatures[0].to_string())
-                    }
-                    "getSignatureStatuses" => {
-                        json!({"context":{"slot":44},"value":[{"slot":44,"confirmations":null,"err":null,"status":{"Ok":null},"confirmationStatus":"finalized"}]})
-                    }
-                    "getMinimumBalanceForRentExemption" => json!(2039280),
-                    "getLatestBlockhash" => {
-                        json!({"context":{"slot":42},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":200}})
-                    }
-                    "simulateTransaction" => {
-                        json!({"context":{"slot":42},"value":{"err":null,"logs":["Program success"],"accounts":null,"unitsConsumed":5000,"loadedAccountsDataSize":1000}})
-                    }
-                    "getFeeForMessage" => json!({"context":{"slot":42},"value":5000}),
-                    method => panic!("Unexpected method: {method}"),
-                };
-                let body = if partial && request["method"] == "getTokenAccountsByOwner" && request["params"][1]["programId"] == tokens::TOKEN_2022 {
-                    json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32603,"message":"Token-2022 unavailable"}})
-                } else { json!({"jsonrpc":"2.0","id":request["id"],"result":result}) }.to_string();
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                socket.write_all(response.as_bytes()).await.unwrap();
-            });
-        }
-    });
-    Server {
-        profile: RpcProfile::custom(
-            "mock",
-            &format!("http://127.0.0.1:{port}"),
-            &format!("ws://127.0.0.1:{port}"),
-        )
-        .unwrap(),
-        requests,
-        task,
-    }
+                json!({"context":{"slot":42},"value":value})
+            }
+            "getBlockHeight" => json!(43),
+            "sendTransaction" => {
+                use base64::Engine;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(request["params"][0].as_str().unwrap())
+                    .unwrap();
+                let tx: solana_transaction::versioned::VersionedTransaction =
+                    wincode::deserialize(&bytes).unwrap();
+                tx.verify_and_hash_message().unwrap();
+                json!(tx.signatures[0].to_string())
+            }
+            "getSignatureStatuses" => {
+                json!({"context":{"slot":44},"value":[{"slot":44,"confirmations":null,"err":null,"status":{"Ok":null},"confirmationStatus":"finalized"}]})
+            }
+            "getMinimumBalanceForRentExemption" => json!(2039280),
+            "getLatestBlockhash" => {
+                json!({"context":{"slot":42},"value":{"blockhash":"11111111111111111111111111111111","lastValidBlockHeight":200}})
+            }
+            "simulateTransaction" => {
+                json!({"context":{"slot":42},"value":{"err":null,"logs":["Program success"],"accounts":null,"unitsConsumed":5000,"loadedAccountsDataSize":1000}})
+            }
+            "getFeeForMessage" => json!({"context":{"slot":42},"value":5000}),
+            method => panic!("Unexpected method: {method}"),
+        };
+        if partial && request["method"] == "getTokenAccountsByOwner" && request["params"][1]["programId"] == tokens::TOKEN_2022 {
+            json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32603,"message":"Token-2022 unavailable"}})
+        } else { json!({"jsonrpc":"2.0","id":request["id"],"result":result}) }
+    }).await
 }
 
 #[tokio::test]

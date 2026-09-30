@@ -111,12 +111,15 @@ class TerminalSession:
         self.wait_for(lambda: bool(values()), "OSC 52 clipboard request")
         return base64.b64decode(values()[-1]).decode()
 
-    def fail(self, message):
+    def save_artifacts(self):
         if self.artifact_dir:
             directory = Path(self.artifact_dir)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "screen.txt").write_text(self.text)
             (directory / "terminal.ansi").write_bytes(self.output)
+
+    def fail(self, message):
+        self.save_artifacts()
         raise AssertionError(f"{message}\nVisible screen:\n{self.text}")
 
     def close(self):
@@ -132,5 +135,9 @@ class TerminalSession:
     def __enter__(self):
         return self
 
-    def __exit__(self, *_):
-        self.close()
+    def __exit__(self, exception_type, *_):
+        try:
+            if exception_type is not None:
+                self.save_artifacts()
+        finally:
+            self.close()

@@ -11,6 +11,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -65,6 +66,7 @@ def main():
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--artifact-dir", type=Path, help="Save terminal state on failure")
     parser.add_argument("--previous-binary", type=Path, help="Also exercise replacement of a real earlier build")
     args = parser.parse_args()
     directory = args.dist_dir.resolve()
@@ -129,8 +131,11 @@ def main():
             assert digest(unpacked) == installed_hash
             report = portability(binary, args.target)
             subprocess.run([binary, "--demo", "--snapshot", str(root / "demo.svg")], cwd=project, env=env, check=True, stdout=subprocess.DEVNULL)
-            subprocess.run([shutil.which("python3") or "python3", str(Path(__file__).resolve().parents[1] / "terminal_smoke.py"), "--binary", str(binary)], env=env, check=True, timeout=120)
-            subprocess.run([shutil.which("python3") or "python3", str(Path(__file__).resolve().parents[1] / "token_smoke.py"), "--binary", str(binary)], env=env, check=True, timeout=120)
+            for script in ["terminal_smoke", "token_smoke"]:
+                command = [sys.executable, str(Path(__file__).resolve().parents[1] / f"{script}.py"), "--binary", str(binary)]
+                if args.artifact_dir:
+                    command += ["--artifact-dir", str(args.artifact_dir.resolve() / script)]
+                subprocess.run(command, env=env, check=True, timeout=120)
             after = {str(p.relative_to(project)): digest(p) for p in project.rglob("*") if p.is_file()}
             assert before == after, "Installation or demo launch modified wallet/configuration data"
             report.update(version=args.version, previous_version=previous_version, archive_sha256=checksum, tests="upgrade, reinstall, checksum rejection, custom path, archive, version, demo, terminal smoke, token terminal smoke, project preservation")

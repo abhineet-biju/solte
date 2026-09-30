@@ -93,9 +93,16 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: dist-${{ matrix.runner }}-${{ matrix.target }}
-      - name: Install native build tools
+      - name: Ensure native build tools are available
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config binutils xz-utils
+        run: |
+          for tool in cc c++ make pkg-config ar readelf xz; do
+            if ! command -v "$tool" > /dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y build-essential pkg-config binutils xz-utils
+              break
+            fi
+          done
       - run: python3 scripts/release/prepare.py --channel "$CHANNEL" --source "$SOURCE" --ref "$SOURCE_REF" --run "$GITHUB_RUN_NUMBER" --attempt "$GITHUB_RUN_ATTEMPT"
       - run: python3 scripts/release/bootstrap_dist.py --directory "$RUNNER_TEMP/dist-bin"
       - name: Build native archive from the locked dependencies
@@ -105,7 +112,14 @@ jobs:
       - name: Generate an installer for the native installation test
         run: '"$RUNNER_TEMP/dist-bin/dist" build --artifacts=global --tag "$RELEASE_TAG" --output-format=json > target/test-global-manifest.json'
       - name: Run the packaged installer and binary natively
-        run: python3 scripts/release/test_install.py --target "$TARGET" --version "$RELEASE_VERSION" --report "target/$TARGET-install-report.json"
+        run: python3 scripts/release/test_install.py --target "$TARGET" --version "$RELEASE_VERSION" --report "target/$TARGET-install-report.json" --artifact-dir "target/install-smoke/$TARGET"
+      - name: Upload terminal state on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: terminal-smoke-${{ matrix.target }}
+          path: target/install-smoke/${{ matrix.target }}/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-${{ matrix.target }}

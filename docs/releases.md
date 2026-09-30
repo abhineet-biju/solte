@@ -139,9 +139,9 @@ python3 -m venv .venv
 cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked
-python3 scripts/terminal_smoke.py
-python3 scripts/token_smoke.py
+cargo build --locked --bin solte
+python3 scripts/terminal_smoke.py --artifact-dir target/terminal-smoke/wallet
+python3 scripts/token_smoke.py --artifact-dir target/terminal-smoke/tokens
 python3 -m unittest discover -s scripts/tests -v
 ```
 
@@ -163,6 +163,10 @@ python3 scripts/release/test_install.py --target aarch64-apple-darwin --version 
 
 The Cargo shim adds `--locked`, which cargo-dist 0.33.0 does not add itself. cargo-dist owns archive and installer generation; authored reusable workflows handle channel policy and native installation tests. Its generated CI is disabled to keep one workflow path for both channels.
 
-The installer test uses a loopback HTTP mirror, a temporary home, and sentinel project data. It checks replacement, reinstallation, custom paths, checksum rejection, installed version, demo rendering, keyboard/mouse terminal smoke, and preservation of wallets/configuration. It runs the binary on the host architecture. CI repeats this on all four native runners and combines the resulting checksums into one installer.
+The installer test uses a loopback HTTP mirror, a temporary home, and sentinel project data. It checks replacement, reinstallation, custom paths, checksum rejection, installed version, demo rendering, keyboard/mouse terminal smoke, and preservation of wallets/configuration. It runs the binary on the host architecture. The packaging workflow repeats this on all four native runners and combines the resulting checksums into one installer.
 
-Actual GitHub publication, artifact attestations, the latest-release redirect, and downloads from a published release must be verified after the first authorized push. Local testing does not exercise those services.
+Every push and pull request runs Rust tests, Clippy, Python tooling tests, and both offline terminal smoke tests on Linux and macOS. Formatting runs once on Linux. The smoke scripts share a PTY harness and wait for the current rendered screen. Failures save the visible screen and terminal output as CI artifacts, including failures against packaged binaries.
+
+Ordinary CI skips the four-platform packaging pipeline when only `README.md`, `AGENTS.md`, the release or usage guide, or verification reports change. Other paths, including the packaged key-handling guide, trigger the complete packaging and installation checks. Pushes compare against the branch's last successful CI run so failed or cancelled code changes remain covered; pull requests compare against their base commit. An unavailable comparison triggers all packaging checks. Superseded CI runs are cancelled. Tagged and manual releases always run the complete checks, native installation matrix, and final installer assembly before publication.
+
+Local packaging checks do not exercise GitHub publication, artifact attestations, the latest-release redirect, or downloads from a published release.
