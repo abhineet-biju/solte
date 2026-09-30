@@ -48,6 +48,10 @@ impl TransactionRecord {
         if self.error.is_some() {
             return "Failed".into();
         }
+        let kind = self.kind();
+        if kind.starts_with("Confidential") {
+            return kind;
+        }
         match self.balance_change(address) {
             Some(delta) if delta > 0 => "Received".into(),
             Some(delta) if delta < -i128::from(self.fee().unwrap_or(0)) => "Sent".into(),
@@ -63,10 +67,31 @@ impl TransactionRecord {
             .as_ref()
             .and_then(|d| d.pointer("/transaction/message/instructions"))
             .and_then(Value::as_array)
-            .and_then(|v| v.first())
+            .and_then(|v| {
+                v.iter()
+                    .find(|instruction| {
+                        instruction
+                            .pointer("/parsed/type")
+                            .and_then(Value::as_str)
+                            .is_some_and(|name| name.to_ascii_lowercase().contains("confidential"))
+                    })
+                    .or_else(|| v.first())
+            })
             .and_then(|v| v.pointer("/parsed/type"))
             .and_then(Value::as_str)
-            .map(str::to_owned)
+            .map(|name| {
+                match name {
+                    "initializeConfidentialTransferMint" => "Confidential mint",
+                    "configureConfidentialTransferAccount" => "Confidential setup",
+                    "approveConfidentialTransferAccount" => "Confidential approval",
+                    "depositConfidentialTransfer" => "Confidential deposit",
+                    "withdrawConfidentialTransfer" => "Confidential withdrawal",
+                    "confidentialTransfer" => "Confidential transfer",
+                    "applyPendingConfidentialTransferBalance" => "Confidential apply",
+                    _ => name,
+                }
+                .to_owned()
+            })
             .unwrap_or_else(|| "Transaction".into())
     }
 

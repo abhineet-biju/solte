@@ -46,7 +46,11 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
-zeroize = "1.9"
+zeroize = { version = "1.9", features = ["derive"] }
+solana-zk-sdk = "=7.0.1"
+solana-zk-sdk-pod = "0.1.2"
+spl-token-confidential-transfer-proof-generation = "=0.6.1"
+spl-token-confidential-transfer-proof-extraction = "=0.6.1"
 
 [profile.release]
 lto = "thin"

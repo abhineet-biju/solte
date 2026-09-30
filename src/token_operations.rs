@@ -61,6 +61,8 @@ pub fn ensure_supported(info: &Value) -> Result<()> {
                 .context("Cannot identify extension")?;
             ensure!(
                 [
+                    "confidentialTransferMint",
+                    "confidentialTransferAccount",
                     "immutableOwner",
                     "mintCloseAuthority",
                     "metadataPointer",
@@ -203,6 +205,12 @@ pub async fn prepare_transfer(
             "Destination account is frozen or uninitialized"
         );
         ensure_supported(info)?;
+        if let Some(state) = crate::confidential::extension(info, "confidentialTransferAccount") {
+            ensure!(
+                state["allowNonConfidentialCredits"].as_bool() == Some(true),
+                "Destination does not accept public token transfers"
+            );
+        }
     }
     ensure!(
         destination != source,
@@ -270,7 +278,7 @@ mod tests {
             "transferFeeConfig",
             "transferHook",
             "nonTransferable",
-            "confidentialTransferMint",
+            "confidentialMintBurn",
             "pausable",
             "unknownFutureExtension",
         ] {

@@ -1249,7 +1249,11 @@ impl Ui {
         let screen = frame.area();
         let modal = app.modal.as_ref().unwrap();
         let height = match modal {
-            Modal::TokenCreation { .. } => 8,
+            Modal::Confidential { account, .. } => {
+                (crate::confidential::choices(account, app.confidential_balances.is_some()).len()
+                    + 5) as u16
+            }
+            Modal::TokenCreation { .. } => 10,
             Modal::Appearance { .. } => 10,
             Modal::Funding { .. } => 15,
             Modal::Form(form) => (form.fields.len() * 3 + 10) as u16,
@@ -1278,6 +1282,7 @@ impl Ui {
             Modal::Funding { .. } => "Fund Devnet wallet",
             Modal::Form(form) => form.title(),
             Modal::Profiles { .. } => "RPC profiles",
+            Modal::Confidential { .. } => "Confidential balances",
             Modal::Token { .. } => "Token account inspector",
             Modal::Mint { .. } => "Mint inspector",
             Modal::ProjectMints { .. } => "Project mints",
@@ -1306,10 +1311,14 @@ impl Ui {
         frame.render_widget(block, area);
         self.target(Rect::new(area.right() - 10, area.y, 9, 1), Action::Close);
         match modal {
+            Modal::Confidential { account, selected } => {
+                self.confidential_menu(frame, app, account, *selected, inner, theme)
+            }
             Modal::TokenCreation { selected } => {
                 for (index, (label, action)) in [
                     ("Token mint", Action::CreateMint),
                     ("Associated token account", Action::CreateTokenAccount),
+                    ("Confidential token mint", Action::CreateConfidentialMint),
                 ]
                 .iter()
                 .enumerate()
@@ -1339,7 +1348,7 @@ impl Ui {
                         .enumerate()
                     {
                         let label = format!(
-                            "{} · {} · {} decimals · {}",
+                            "{} · {} · {} decimals · {}{}",
                             short(&mint.record.address),
                             if mint.record.program == crate::tokens::TOKEN_2022 {
                                 "Token-2022"
@@ -1351,6 +1360,14 @@ impl Ui {
                                 "Ready"
                             } else {
                                 "Unavailable"
+                            },
+                            if mint.info.as_ref().is_some_and(|info| {
+                                crate::confidential::extension(info, "confidentialTransferMint")
+                                    .is_some()
+                            }) {
+                                " · CT"
+                            } else {
+                                ""
                             }
                         );
                         self.button(
@@ -1414,6 +1431,9 @@ impl Ui {
                 );
                 self.inspection_body(frame, body, account.lines(), *scroll, theme);
                 let mut primary = vec![("Send [s]", Action::Send)];
+                if crate::confidential::enabled(account) {
+                    primary.push(("Confidential [c]", Action::Confidential));
+                }
                 if account
                     .mint_info
                     .as_ref()
@@ -1616,6 +1636,8 @@ impl Ui {
                     crate::app::FormKind::Profile => {
                         "Profiles are stored locally in .solte/config.toml."
                     }
+                    crate::app::FormKind::Confidential(_) => "Amounts and confidential balances are private; account addresses stay public. Send and withdraw use v1 with inline proofs.",
+                    crate::app::FormKind::ConfidentialMint => "Token-2022. Initial tokens are public; configure and deposit them to use confidential balances. Auditor key is optional.",
                     crate::app::FormKind::MintCreate => "No extensions. Blank freeze authority disables freezing. Initial supply goes to the active wallet; its authority must be loaded.",
                     crate::app::FormKind::MintMore => "Requires a loaded mint authority. Amount uses mint decimals. Recipient's associated account is created if missing.",
                     crate::app::FormKind::TokenCreate => "Creates the recipient wallet’s associated account for this mint. Payer covers rent.",
@@ -1842,7 +1864,7 @@ impl Ui {
                     if prepared.imported {
                         "Review every instruction and account below before signing.".into()
                     } else if !prepared.summary.is_empty() {
-                        "Review mint, raw amount, destination and rent above.".into()
+                        "Review the accounts, amount and rent above.".into()
                     } else {
                         format!("Amount     {} SOL", format_sol(prepared.lamports))
                     },
@@ -1937,7 +1959,11 @@ impl Ui {
                     "Mint creation: program, decimals, authorities, initial supply",
                     "Mint authority can be a different loaded project wallet.",
                     "Transfer destination: wallet/create ATA or explicit token account",
-                    "Transfer-affecting Token-2022 extensions are inspectable only.",
+                    "Token inspector: [c] Confidential balances and account actions",
+                    "Reveal/Hide balances; Configure; Approve; Deposit; Apply; Send; Withdraw",
+                    "Create chooser: Confidential token mint, automatic/manual approval",
+                    "Confidential sends/withdrawals require v1 and ZK proof support.",
+                    "Confidential fees and mint/burn extensions remain inspectable only.",
                     "Token amounts use exact integers; empty accounts remain visible.",
                     "",
                     "TRANSACTIONS AND LOGS",

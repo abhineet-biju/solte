@@ -345,6 +345,7 @@ async fn mint_creation_reviews_both_signers_and_tracks_public_data_before_submis
                 &payer,
                 std::slice::from_ref(&authority),
                 CreateMint {
+                    confidential: None,
                     program: program.parse().unwrap(),
                     decimals: 6,
                     authority: authority.address.parse().unwrap(),
@@ -417,6 +418,7 @@ async fn mint_creation_reviews_both_signers_and_tracks_public_data_before_submis
         &payer,
         &[],
         CreateMint {
+            confidential: None,
             program: tokens::TOKEN_PROGRAM.parse().unwrap(),
             decimals: 0,
             authority: authority.address.parse().unwrap(),
@@ -435,6 +437,7 @@ async fn mint_creation_reviews_both_signers_and_tracks_public_data_before_submis
             &payer,
             &[],
             CreateMint {
+                confidential: None,
                 program: tokens::TOKEN_PROGRAM.parse().unwrap(),
                 decimals: 6,
                 authority: authority.address.parse().unwrap(),
@@ -517,6 +520,7 @@ async fn mint_mainnet_and_failed_reviews_never_create_project_records_or_send() 
     let store = Store::open(root.path()).unwrap();
     let mainnet = server_on_network(false, network::MAINNET_GENESIS).await;
     let options = || CreateMint {
+        confidential: None,
         program: tokens::TOKEN_PROGRAM.parse().unwrap(),
         decimals: 6,
         authority: payer.address.parse().unwrap(),
@@ -562,5 +566,38 @@ async fn mint_mainnet_and_failed_reviews_never_create_project_records_or_send() 
             .unwrap()
             .iter()
             .any(|r| r["method"] == "sendTransaction")
+    );
+}
+
+#[tokio::test]
+async fn confidential_mainnet_rejection_precedes_account_reads_and_key_loading() {
+    use solte::confidential_operations::{self, Operation, Request};
+    let server = server_on_network(false, network::MAINNET_GENESIS).await;
+    let mut app = App::new("/fixture".into(), Config::default(), vec![]);
+    demo::populate(&mut app);
+    let error = confidential_operations::prepare(
+        &server.profile,
+        &app.wallets[0],
+        &app.wallets,
+        &app.tokens[2],
+        Request {
+            operation: Operation::Configure,
+            value: "65536".into(),
+            recipient: String::new(),
+            recipient_is_account: false,
+        },
+    )
+    .await
+    .err()
+    .unwrap()
+    .to_string();
+    assert!(error.to_lowercase().contains("mainnet"));
+    assert!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|request| request["method"] == "getGenesisHash")
     );
 }

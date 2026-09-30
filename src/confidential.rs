@@ -83,6 +83,36 @@ fn number(state: &Value, key: &str) -> String {
     }
 }
 
+pub fn choices(
+    account: &TokenAccount,
+    revealed: bool,
+) -> Vec<crate::confidential_operations::Operation> {
+    use crate::confidential_operations::Operation::*;
+    let state = extension(account.info(), "confidentialTransferAccount");
+    let configured = state.is_some_and(|state| {
+        state["elgamalPubkey"].as_str().is_some_and(|key| {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(key)
+                .is_ok_and(|bytes| bytes.len() == 32 && bytes.iter().any(|b| *b != 0))
+        })
+    });
+    if !configured {
+        vec![Configure]
+    } else if state.is_some_and(|state| state["approved"] == false) {
+        vec![Approve, if revealed { Lock } else { Reveal }]
+    } else {
+        vec![
+            if revealed { Lock } else { Reveal },
+            Deposit,
+            Apply,
+            Transfer,
+            Withdraw,
+            Approve,
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

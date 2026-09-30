@@ -1,6 +1,7 @@
 pub mod amount;
 pub mod app;
 pub mod confidential;
+pub mod confidential_operations;
 pub mod config;
 pub mod demo;
 pub mod funding;

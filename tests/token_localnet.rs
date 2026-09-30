@@ -284,6 +284,7 @@ async fn project_mint_creation_and_issuance_work_on_both_programs() {
                 &payer,
                 &wallets,
                 CreateMint {
+                    confidential: None,
                     program: program_address,
                     decimals: 6,
                     authority: authority.address.parse().unwrap(),

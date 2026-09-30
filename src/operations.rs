@@ -22,6 +22,8 @@ use crate::{
 };
 
 pub struct PreparedTransfer {
+    pub state_guards: Vec<(Pubkey, [u8; 32])>,
+    pub confidential: bool,
     pub extra_wallets: Vec<Wallet>,
     pub mint_signer: Option<solana_keypair::Keypair>,
     pub created_mint: Option<crate::mints::MintRecord>,
@@ -40,6 +42,16 @@ pub struct PreparedTransfer {
     pub units: Option<u64>,
     pub simulation_error: Option<String>,
     pub last_valid_block_height: u64,
+}
+
+impl Drop for PreparedTransfer {
+    fn drop(&mut self) {
+        if self.confidential {
+            use zeroize::Zeroize;
+            self.summary.zeroize();
+            self.logs.zeroize();
+        }
+    }
 }
 
 pub enum OperationUpdate {
@@ -190,6 +202,8 @@ pub(crate) async fn inspect(
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| anyhow::anyhow!("Fee unavailable; blockhash may have expired"))?;
     Ok(PreparedTransfer {
+        state_guards: vec![],
+        confidential: false,
         extra_wallets: vec![],
         mint_signer: None,
         created_mint: None,
@@ -235,6 +249,13 @@ async fn validate_review(prepared: &PreparedTransfer) -> Result<()> {
     if crate::transaction::resolve_accounts(&rpc, &prepared.transaction).await? != prepared.accounts
     {
         bail!("Lookup-table resolution changed. Review the transaction again.");
+    }
+    for (address, expected) in &prepared.state_guards {
+        let account = rpc.get_account(address).await?;
+        if crate::confidential_operations::account_guard(&account.owner, &account.data) != *expected
+        {
+            bail!("Confidential account or mint changed. Prepare and review again.");
+        }
     }
     Ok(())
 }

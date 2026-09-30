@@ -190,11 +190,17 @@ impl Ui {
             Some(Modal::Appearance { kind, selected }) => {
                 Some(Action::SelectAppearance(*kind, *selected))
             }
-            Some(Modal::TokenCreation { selected }) => Some(if *selected == 0 {
-                Action::CreateMint
-            } else {
-                Action::CreateTokenAccount
+            Some(Modal::TokenCreation { selected }) => Some(match *selected {
+                0 => Action::CreateMint,
+                1 => Action::CreateTokenAccount,
+                _ => Action::CreateConfidentialMint,
             }),
+            Some(Modal::Confidential { account, selected }) => {
+                crate::confidential::choices(account, app.confidential_balances.is_some())
+                    .get(*selected)
+                    .copied()
+                    .map(Action::ConfidentialOperation)
+            }
             Some(Modal::ProjectMints { selected }) => Some(Action::SelectMint(*selected)),
             Some(Modal::Profiles { selected }) => Some(Action::SelectProfile(*selected)),
             Some(Modal::Funding { selected, .. }) => Some(match selected {

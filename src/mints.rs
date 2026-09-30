@@ -49,6 +49,20 @@ impl ProjectMint {
             ] {
                 lines.push(format!("{label}: {}", info[key].as_str().unwrap_or("None")));
             }
+            if let Some(state) = crate::confidential::extension(info, "confidentialTransferMint") {
+                lines.extend([
+                    "Confidential balances enabled".into(),
+                    format!("Automatic approval {}", state["autoApproveNewAccounts"]),
+                    format!(
+                        "Approval authority {}",
+                        state["authority"].as_str().unwrap_or("None")
+                    ),
+                    format!(
+                        "Auditor {}",
+                        state["auditorElgamalPubkey"].as_str().unwrap_or("None")
+                    ),
+                ]);
+            }
         } else {
             lines.push(format!(
                 "Unavailable: {}",
@@ -106,7 +120,13 @@ pub async fn fetch(
     Ok(mints)
 }
 
+pub struct ConfidentialMintConfig {
+    pub auto_approve: bool,
+    pub auditor: Option<solana_zk_sdk_pod::encryption::elgamal::PodElGamalPubkey>,
+}
+
 pub struct CreateMint {
+    pub confidential: Option<ConfidentialMintConfig>,
     pub program: Pubkey,
     pub decimals: u8,
     pub authority: Pubkey,
@@ -126,6 +146,15 @@ pub async fn prepare_create(
         [tokens::TOKEN_PROGRAM, tokens::TOKEN_2022].contains(&options.program.to_string().as_str()),
         "Choose SPL Token or Token-2022"
     );
+    if let Some(config) = &options.confidential
+        && let Some(auditor) = config.auditor
+    {
+        ensure!(
+            auditor.0 != [0; 32]
+                && solana_zk_sdk::encryption::elgamal::ElGamalPubkey::try_from(auditor).is_ok(),
+            "Auditor must be a valid nonzero ElGamal public key"
+        );
+    }
     let authority = if options.initial_supply > 0 {
         Some(wallets.iter().find(|w| !w.program && w.address == options.authority.to_string()).context("Initial supply requires a mint authority keypair loaded in Solte; use zero supply for an external authority")?.clone())
     } else {
@@ -136,13 +165,27 @@ pub async fn prepare_create(
     let signer = Keypair::new();
     let mint = signer.pubkey();
     let payer_address = payer.address.parse()?;
-    let rent = rpc.get_minimum_balance_for_rent_exemption(82).await?;
+    use spl_token_2022_interface::{extension::ExtensionType, state::Mint};
+    let mint_size = if options.confidential.is_some() {
+        ensure!(
+            options.program.to_string() == tokens::TOKEN_2022,
+            "Confidential mints require Token-2022"
+        );
+        ExtensionType::try_calculate_account_len::<Mint>(&[
+            ExtensionType::ConfidentialTransferMint,
+        ])?
+    } else {
+        82
+    };
+    let rent = rpc
+        .get_minimum_balance_for_rent_exemption(mint_size)
+        .await?;
     let mut instructions = vec![
         solana_system_interface::instruction::create_account(
             &payer_address,
             &mint,
             rent,
-            82,
+            mint_size as u64,
             &options.program,
         ),
         spl_token_2022_interface::instruction::initialize_mint2(
@@ -153,6 +196,9 @@ pub async fn prepare_create(
             options.decimals,
         )?,
     ];
+    if let Some(config) = &options.confidential {
+        instructions.insert(1, spl_token_2022_interface::extension::confidential_transfer::instruction::initialize_mint(&options.program, &mint, Some(options.authority), config.auto_approve, config.auditor)?);
+    }
     let destination = tokens::associated_address(&payer_address, &mint, &options.program);
     if options.initial_supply > 0 {
         instructions.push(token_operations::create_associated(
@@ -194,7 +240,11 @@ pub async fn prepare_create(
         signature: String::new(),
     });
     prepared.summary = vec![
-        "Create token mint · no extensions".into(),
+        if options.confidential.is_some() {
+            "Create confidential Token-2022 mint".into()
+        } else {
+            "Create token mint · no extensions".into()
+        },
         format!("Mint       {mint}"),
         format!("Program    {}", options.program),
         format!("Decimals   {}", options.decimals),
@@ -213,6 +263,9 @@ pub async fn prepare_create(
         ),
         format!("Mint rent {} SOL", crate::amount::format_sol(rent)),
     ];
+    if let Some(config) = &options.confidential {
+        prepared.summary.extend([format!("Account approval {}", if config.auto_approve { "Automatic" } else { "Manual · mint authority approves accounts" }), format!("Auditor {}", config.auditor.map(|key| key.to_string()).unwrap_or_else(|| "None".into())), "Initial tokens are public. Configure the account, then deposit and apply to use confidential balances.".into()]);
+    }
     if options.initial_supply > 0 {
         let account_size = if options.program.to_string() == tokens::TOKEN_2022 {
             170

@@ -13,6 +13,82 @@ use crate::{
 };
 
 impl Ui {
+    pub(super) fn confidential_menu(
+        &mut self,
+        frame: &mut Frame,
+        app: &App,
+        account: &crate::tokens::TokenAccount,
+        selected: usize,
+        inner: Rect,
+        theme: Theme,
+    ) {
+        use ratatui::widgets::Paragraph;
+        let balances = app
+            .confidential_balances
+            .as_ref()
+            .filter(|(address, _)| address == &account.address)
+            .map(|(_, balances)| balances);
+        let private = balances
+            .map(|b| format_amount(b.available, account.decimals))
+            .unwrap_or_else(|| "Locked".into());
+        frame.render_widget(
+            Paragraph::new(format!(
+                "Public {} · Available {private}",
+                format_amount(
+                    balances.map_or(account.amount, |b| b.public),
+                    account.decimals
+                )
+            ))
+            .style(Style::default().fg(theme.green)),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        let pending = balances
+            .map(|b| format_amount(b.pending, account.decimals))
+            .unwrap_or_else(|| "Encrypted".into());
+        frame.render_widget(
+            Paragraph::new(format!("Pending {pending} · apply before spending"))
+                .style(Style::default().fg(theme.muted)),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+        let choices = crate::confidential::choices(account, balances.is_some());
+        let capacity = inner.height.saturating_sub(3).max(1) as usize;
+        let selected = selected.min(choices.len().saturating_sub(1));
+        let start = selected.saturating_sub(capacity - 1);
+        for (row, (index, operation)) in choices
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(capacity)
+            .enumerate()
+        {
+            self.button(
+                frame,
+                Rect::new(inner.x, inner.y + 2 + row as u16, inner.width, 1),
+                &format!("{} [Enter]", operation.label()),
+                Action::ConfidentialOperation(*operation),
+                theme,
+                index == selected,
+            );
+        }
+        frame.render_widget(
+            Paragraph::new(format!(
+                "[↑]/[↓] · {}–{} of {}{}",
+                start + 1,
+                (start + capacity).min(choices.len()),
+                choices.len(),
+                if start + capacity < choices.len() {
+                    " · ↓ more"
+                } else if start > 0 {
+                    " · ↑ more"
+                } else {
+                    ""
+                }
+            ))
+            .style(Style::default().fg(theme.muted)),
+            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+        );
+    }
+
     pub(super) fn token_buttons(
         &mut self,
         frame: &mut Frame,
@@ -154,7 +230,7 @@ impl Ui {
                 "{}{}",
                 format_amount(account.amount, account.decimals),
                 if crate::confidential::enabled(account) {
-                    " · CT"
+                    " public · CT"
                 } else {
                     ""
                 }
@@ -300,6 +376,56 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     #[test]
+    fn confidential_menu_keeps_keyboard_actions_visible_and_mouse_equivalent() {
+        use crate::{app::Modal, confidential_operations::Operation};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        demo::populate(&mut app);
+        app.tokens[2].account["data"]["parsed"]["info"]["extensions"] = serde_json::json!([{"extension":"confidentialTransferAccount","state":{"approved":true,"elgamalPubkey":"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk="}}]);
+        for theme in ["neon", "ember", "glacier", "orchid"] {
+            app.config.theme = theme.into();
+            for (width, height) in [(60, 10), (80, 20), (100, 28), (160, 48)] {
+                let mut ui = Ui::default();
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                let choices = crate::confidential::choices(&app.tokens[2], false);
+                for (index, operation) in choices.iter().enumerate() {
+                    app.modal = Some(Modal::Confidential {
+                        account: Box::new(app.tokens[2].clone()),
+                        selected: index,
+                    });
+                    terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+                    let action = Action::ConfidentialOperation(*operation);
+                    let hit = ui.hits.iter().find(|hit| hit.action == action).unwrap();
+                    assert_eq!(
+                        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+                        Some(action.clone())
+                    );
+                    assert_eq!(ui.click(&mut app, hit.area.x, hit.area.y), Some(action));
+                    assert!(
+                        ui.hits
+                            .iter()
+                            .all(|hit| hit.area.right() <= width && hit.area.bottom() <= height)
+                    );
+                }
+                app.confidential_balances = Some((
+                    app.tokens[2].address.clone(),
+                    zeroize::Zeroizing::new(crate::confidential_operations::Balances {
+                        public: 125_000_000,
+                        available: 7,
+                        pending: 3,
+                    }),
+                ));
+                assert_eq!(
+                    crate::confidential::choices(&app.tokens[2], true)[0],
+                    Operation::Lock
+                );
+                app.navigate(&Action::Close);
+                assert!(app.confidential_balances.is_none());
+            }
+        }
+    }
+
+    #[test]
     fn token_forms_keep_every_field_and_submission_inside_compact_dialogs() {
         for (width, height) in [(60, 10), (80, 20), (160, 48)] {
             let mut app = App::new("/test".into(), Config::default(), vec![]);
@@ -307,6 +433,16 @@ mod tests {
             let mut ui = Ui::default();
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             for kind in [
+                crate::app::FormKind::ConfidentialMint,
+                crate::app::FormKind::Confidential(
+                    crate::confidential_operations::Operation::Configure,
+                ),
+                crate::app::FormKind::Confidential(
+                    crate::confidential_operations::Operation::Transfer,
+                ),
+                crate::app::FormKind::Confidential(
+                    crate::confidential_operations::Operation::Apply,
+                ),
                 crate::app::FormKind::TokenCreate,
                 crate::app::FormKind::MintCreate,
                 crate::app::FormKind::MintMore,

@@ -127,6 +127,8 @@ pub enum FormKind {
     TokenCreate,
     TokenTransfer,
     MintCreate,
+    ConfidentialMint,
+    Confidential(crate::confidential_operations::Operation),
     MintMore,
 }
 
@@ -153,6 +155,9 @@ pub enum Action {
     CreateTokenAccount,
     TokenCreation,
     CreateMint,
+    CreateConfidentialMint,
+    Confidential,
+    ConfidentialOperation(crate::confidential_operations::Operation),
     ProjectMints,
     SelectMint(usize),
     MintMore,
@@ -293,7 +298,7 @@ impl Form {
                 Field::new("HTTP RPC endpoint", "http://127.0.0.1:8899"),
                 Field::new("WebSocket endpoint", "ws://127.0.0.1:8900"),
             ],
-            FormKind::MintCreate => vec![
+            FormKind::MintCreate | FormKind::ConfidentialMint => vec![
                 Field::choice(
                     "Token program · [←]/[→] choose",
                     &["SPL Token", "Token-2022"],
@@ -304,6 +309,23 @@ impl Form {
                 Field::new("Initial supply · tokens", "0"),
                 Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
             ],
+            FormKind::Confidential(operation) => match operation {
+                crate::confidential_operations::Operation::Configure => {
+                    vec![Field::new("Maximum pending credits", "65536")]
+                }
+                crate::confidential_operations::Operation::Approve => {
+                    vec![Field::new("Token account to approve", "")]
+                }
+                crate::confidential_operations::Operation::Transfer => vec![
+                    Field::new("Recipient address", ""),
+                    Field::new("Amount · tokens", ""),
+                    Field::choice("Destination type", &["Wallet ATA", "Token account"]),
+                ],
+                crate::confidential_operations::Operation::Apply => {
+                    vec![Field::choice("Action", &["Apply pending balance"])]
+                }
+                _ => vec![Field::new("Amount · tokens", "")],
+            },
             FormKind::MintMore => vec![
                 Field::new("Mint address", ""),
                 Field::new("Recipient wallet address", ""),
@@ -331,6 +353,15 @@ impl Form {
             FormKind::LogSearch => vec![Field::new("Message or level", "")],
             FormKind::Search => vec![Field::new("Signature, instruction, or error", "")],
         };
+        let mut fields = fields;
+        if kind == FormKind::ConfidentialMint {
+            fields[0] = Field::choice("Token program", &["Token-2022"]);
+            fields.push(Field::choice(
+                "Confidential account approval",
+                &["Automatic", "Manual"],
+            ));
+            fields.push(Field::new("Auditor ElGamal public key · optional", ""));
+        }
         Self {
             kind,
             fields,
@@ -353,6 +384,8 @@ impl Form {
             FormKind::TokenCreate => "Create associated token account",
             FormKind::TokenTransfer => "Send tokens",
             FormKind::MintCreate => "Create token mint",
+            FormKind::ConfidentialMint => "Create confidential token mint",
+            FormKind::Confidential(operation) => operation.label(),
             FormKind::MintMore => "Mint tokens",
         }
     }
@@ -367,7 +400,9 @@ impl Form {
             FormKind::TokenCreate
             | FormKind::TokenTransfer
             | FormKind::MintCreate
-            | FormKind::MintMore => "Simulate & review",
+            | FormKind::MintMore
+            | FormKind::ConfidentialMint
+            | FormKind::Confidential(_) => "Simulate & review",
             FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch => "Apply filter",
         }
     }
@@ -473,6 +508,10 @@ impl Appearance {
 }
 
 pub enum Modal {
+    Confidential {
+        account: Box<crate::tokens::TokenAccount>,
+        selected: usize,
+    },
     TokenCreation {
         selected: usize,
     },
@@ -548,8 +587,14 @@ pub struct App {
     pub token_cursor: usize,
     pub token_export: Option<crate::tokens::TokenAccount>,
     pub token_operation: Option<crate::tokens::TokenAccount>,
+    pub confidential_request: u64,
+    pub confidential_balances: Option<(
+        String,
+        zeroize::Zeroizing<crate::confidential_operations::Balances>,
+    )>,
     pub token_filter: String,
     pub token_loading: bool,
+    pub token_refresh_after: bool,
     pub token_started: Option<Instant>,
     pub token_updated: Option<Instant>,
     pub token_error: Option<String>,
@@ -606,8 +651,11 @@ impl App {
             token_export: None,
             token_operation: None,
             token_cursor: 0,
+            confidential_request: 0,
+            confidential_balances: None,
             token_filter: String::new(),
             token_loading: false,
+            token_refresh_after: false,
             token_started: None,
             token_updated: None,
             token_error: None,
@@ -889,6 +937,7 @@ impl App {
                         Modal::Funding { .. }
                             | Modal::Appearance { .. }
                             | Modal::Profiles { .. }
+                            | Modal::Confidential { .. }
                             | Modal::TokenCreation { .. }
                             | Modal::ProjectMints { .. }
                     ) =>
@@ -901,6 +950,7 @@ impl App {
                         Modal::Funding { .. }
                             | Modal::Appearance { .. }
                             | Modal::Profiles { .. }
+                            | Modal::Confidential { .. }
                             | Modal::TokenCreation { .. }
                             | Modal::ProjectMints { .. }
                     ) =>
@@ -937,6 +987,18 @@ impl App {
                     Some(Action::CreateTokenAccount)
                 }
                 KeyCode::Enter if matches!(modal, Modal::Mint { .. }) => Some(Action::Close),
+                KeyCode::Enter if matches!(modal, Modal::Confidential { .. }) => {
+                    let Modal::Confidential { account, selected } = modal else {
+                        unreachable!()
+                    };
+                    crate::confidential::choices(account, self.confidential_balances.is_some())
+                        .get(*selected)
+                        .copied()
+                        .map(Action::ConfidentialOperation)
+                }
+                KeyCode::Char('c') if matches!(modal, Modal::Token { .. }) => {
+                    Some(Action::Confidential)
+                }
                 KeyCode::Char('s') if matches!(modal, Modal::Token { .. }) => Some(Action::Send),
                 KeyCode::Char('a') if matches!(modal, Modal::Token { .. }) => {
                     Some(Action::CreateTokenAccount)
@@ -1078,8 +1140,16 @@ impl App {
                 }
             },
             Action::Scroll(delta) => match &mut self.modal {
+                Some(Modal::Confidential { account, selected }) => {
+                    *selected = move_index(
+                        *selected,
+                        delta,
+                        crate::confidential::choices(account, self.confidential_balances.is_some())
+                            .len(),
+                    )
+                }
                 Some(Modal::TokenCreation { selected }) => {
-                    *selected = move_index(*selected, delta, 2)
+                    *selected = move_index(*selected, delta, 3)
                 }
                 Some(Modal::ProjectMints { selected }) => {
                     *selected = move_index(*selected, delta, self.project_mints.len())
@@ -1195,6 +1265,18 @@ impl App {
                 self.selector_focus = false;
             }
             Action::Close => {
+                if matches!(
+                    self.modal,
+                    Some(Modal::Confidential { .. })
+                        | Some(Modal::Form(Form {
+                            kind: FormKind::Confidential(_),
+                            ..
+                        }))
+                ) {
+                    self.confidential_request = self.confidential_request.wrapping_add(1);
+                    self.busy = None;
+                }
+                self.confidential_balances = None;
                 self.modal = None;
             }
             _ => return false,
@@ -1338,6 +1420,19 @@ mod tests {
         app.records.clear();
         app.navigate(&Action::Failures);
         assert!(app.status.contains("0 matching failed"));
+    }
+
+    #[test]
+    fn closing_confidential_work_cancels_pending_results_and_clears_balances() {
+        let mut app = App::new(PathBuf::new(), Config::default(), vec![]);
+        app.open_form(FormKind::Confidential(
+            crate::confidential_operations::Operation::Apply,
+        ));
+        app.busy = Some("Preparing proofs".into());
+        let request = app.confidential_request;
+        app.navigate(&Action::Close);
+        assert!(app.busy.is_none() && app.modal.is_none());
+        assert_ne!(app.confidential_request, request);
     }
 
     #[test]

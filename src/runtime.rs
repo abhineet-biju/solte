@@ -28,6 +28,17 @@ use crate::{
 };
 
 enum LocalEvent {
+    ConfidentialPrepared {
+        session: u64,
+        request: u64,
+        result: Result<Box<crate::operations::PreparedTransfer>>,
+    },
+    Confidential {
+        request: u64,
+        session: u64,
+        address: String,
+        result: Result<zeroize::Zeroizing<crate::confidential_operations::Balances>>,
+    },
     Tokens {
         session: u64,
         result: Result<crate::tokens::Snapshot>,
@@ -56,10 +67,14 @@ impl Services {
         app.session += 1;
         app.records.clear();
         app.tokens.clear();
+        app.confidential_balances = None;
+        app.confidential_request = app.confidential_request.wrapping_add(1);
         app.project_mints.clear();
         app.mint_receipt = None;
         app.token_cursor = 0;
         app.token_loading = false;
+        app.token_refresh_after = false;
+        app.confidential_balances = None;
         app.token_started = None;
         app.token_updated = None;
         app.token_genesis = None;
@@ -263,7 +278,8 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     },
                     Update::Network(network, balance) => {
                         if app.token_genesis.as_ref().is_some_and(|genesis| *genesis != network.genesis) {
-                            app.tokens.clear(); app.project_mints.clear(); app.token_cursor = 0; app.token_updated = None;
+                            app.tokens.clear();
+        app.confidential_balances = None; app.project_mints.clear(); app.token_cursor = 0; app.token_updated = None;
                             app.token_genesis = None; app.token_error = None; app.token_warnings.clear();
                         }
                         if !matches!(app.refresh, RefreshState::Pending(_)) {
@@ -287,9 +303,9 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                             record.signature = signature.clone();
                             app.modal = Some(Modal::Mint { mint: Box::new(crate::mints::ProjectMint { record, info: None, error: Some("Confirmed. Refreshing mint details…".into()) }), scroll: 0 });
                         }
-                        if app.view == crate::app::View::Tokens { services.load_tokens(&mut app); } app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
+                        if app.view == crate::app::View::Tokens { app.token_refresh_after = app.token_loading; services.load_tokens(&mut app); } app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Exported(path) => { app.busy = None; app.status = format!("Signed transaction exported to {path} · not submitted"); app.log("INFO", app.status.clone()); },
-                    OperationUpdate::Failed(message) => { app.mint_receipt = None; if app.view == crate::app::View::Tokens { services.load_tokens(&mut app); } app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
+                    OperationUpdate::Failed(message) => { app.mint_receipt = None; if app.view == crate::app::View::Tokens { app.token_refresh_after = app.token_loading; services.load_tokens(&mut app); } app.busy = None; report_error(&mut app, message); services.command(Command::Refresh); },
                     OperationUpdate::FundingFailed(message) => {
                         app.busy = None;
                         report_error(&mut app, message.clone());
@@ -299,7 +315,32 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                 }
             },
             Some(event) = local_receiver.recv() => match event {
-                LocalEvent::Tokens { session, result } => apply_token_update(&mut app, session, result),
+                LocalEvent::ConfidentialPrepared { session, request, result } => {
+                    if session == app.session && request == app.confidential_request {
+                        app.busy = None;
+                        match result {
+                            Ok(prepared) => { app.modal = Some(Modal::Review { prepared, scroll: 0 }); ui.animate(&app); },
+                            Err(error) => { let message = network::safe_error(error, app.profile()); report_error(&mut app, message); },
+                        }
+                    }
+                },
+                LocalEvent::Confidential { session, request, address, result } => {
+                    if session == app.session && request == app.confidential_request {
+                        app.busy = None;
+                        if matches!(&app.modal, Some(Modal::Confidential { account, .. }) if account.address == address) {
+                            match result {
+                                Ok(balances) => { app.confidential_balances = Some((address, balances)); app.status = "Confidential balances revealed for this snapshot · Hide balances to clear them".into(); },
+                                Err(error) => { let message = network::safe_error(error, app.profile()); report_error(&mut app, message); },
+                            }
+                        }
+                    }
+                },
+                LocalEvent::Tokens { session, result } => {
+                    apply_token_update(&mut app, session, result);
+                    if session == app.session && app.token_refresh_after {
+                        app.token_refresh_after = false; services.load_tokens(&mut app);
+                    }
+                },
                 LocalEvent::Wallet(result) => {
                     app.busy = None;
                     match result {
@@ -374,6 +415,23 @@ fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens:
             if let Some(Modal::ProjectMints { selected }) = &mut app.modal {
                 *selected = (*selected).min(app.project_mints.len().saturating_sub(1));
             }
+            app.confidential_balances = None;
+            if let Some(Modal::Confidential { account, selected }) = &mut app.modal {
+                if let Some(current) = snapshot
+                    .accounts
+                    .iter()
+                    .find(|a| a.address == account.address)
+                {
+                    **account = current.clone();
+                    *selected = (*selected).min(
+                        crate::confidential::choices(account, false)
+                            .len()
+                            .saturating_sub(1),
+                    );
+                } else {
+                    app.modal = None;
+                }
+            }
             app.tokens = snapshot.accounts;
             app.token_genesis = Some(snapshot.genesis);
             app.token_warnings = snapshot.warnings;
@@ -440,10 +498,10 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
     if action == Action::Submit {
         match &app.modal {
             Some(Modal::TokenCreation { selected }) => {
-                action = if *selected == 0 {
-                    Action::CreateMint
-                } else {
-                    Action::CreateTokenAccount
+                action = match *selected {
+                    0 => Action::CreateMint,
+                    1 => Action::CreateTokenAccount,
+                    _ => Action::CreateConfidentialMint,
                 }
             }
             Some(Modal::ProjectMints { selected }) => action = Action::SelectMint(*selected),
@@ -482,6 +540,8 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 | Action::Send
                 | Action::CreateTokenAccount
                 | Action::CreateMint
+                | Action::CreateConfidentialMint
+                | Action::Confidential
                 | Action::MintMore
                 | Action::ImportTransaction
                 | Action::Submit
@@ -490,6 +550,73 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         bail!("Wait for the current operation to finish");
     }
     match action {
+        Action::Confidential => {
+            let account = match &app.modal {
+                Some(Modal::Token { account, .. }) => account.as_ref(),
+                _ => app
+                    .selected_token()
+                    .context("Select a token account first")?,
+            }
+            .clone();
+            anyhow::ensure!(
+                crate::confidential::enabled(&account),
+                "This mint does not support confidential balances"
+            );
+            app.confidential_balances = None;
+            app.modal = Some(Modal::Confidential {
+                account: Box::new(account),
+                selected: 0,
+            });
+        }
+        Action::ConfidentialOperation(operation) => {
+            use crate::confidential_operations::Operation;
+            let Some(Modal::Confidential { account, .. }) = &app.modal else {
+                bail!("Open a confidential account first");
+            };
+            let account = account.as_ref().clone();
+            if operation == Operation::Lock {
+                app.confidential_balances = None;
+                return Ok(false);
+            }
+            anyhow::ensure!(
+                !services.offline && !app.demo,
+                "Confidential operations require a live development network; demo shows public fixtures only"
+            );
+            anyhow::ensure!(
+                app.busy.is_none(),
+                "Wait for the current operation to finish"
+            );
+            app.token_operation = Some(account.clone());
+            app.confidential_balances = None;
+            if operation == Operation::Reveal {
+                let wallet = app.wallet().context("Select the owner wallet")?.clone();
+                let profile = app.profile().clone();
+                let session = app.session;
+                let sender = services.local_sender.clone();
+                app.confidential_request = app.confidential_request.wrapping_add(1);
+                let request = app.confidential_request;
+                app.busy = Some("Decrypting confidential balances…".into());
+                services.jobs.spawn(async move {
+                    let result =
+                        crate::confidential_operations::reveal(&profile, &wallet, &account).await;
+                    let _ = sender
+                        .send(LocalEvent::Confidential {
+                            request,
+                            session,
+                            address: account.address,
+                            result,
+                        })
+                        .await;
+                });
+            } else {
+                app.open_form(FormKind::Confidential(operation));
+                if operation == Operation::Approve
+                    && let Some(Modal::Form(form)) = &mut app.modal
+                {
+                    form.fields[0].insert(&account.address);
+                }
+            }
+        }
         Action::TokenCreation => app.modal = Some(Modal::TokenCreation { selected: 0 }),
         Action::ProjectMints => app.modal = Some(Modal::ProjectMints { selected: 0 }),
         Action::SelectMint(index) => {
@@ -517,11 +644,15 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 scroll: 0,
             });
         }
-        Action::CreateMint => {
+        Action::CreateMint | Action::CreateConfidentialMint => {
             let wallet = app.wallet().context("Select a signing wallet first")?;
             anyhow::ensure!(!wallet.program, "Program identities are read-only");
             let owner = wallet.address.clone();
-            app.open_form(FormKind::MintCreate);
+            app.open_form(if action == Action::CreateConfidentialMint {
+                FormKind::ConfidentialMint
+            } else {
+                FormKind::MintCreate
+            });
             if let Some(Modal::Form(form)) = &mut app.modal {
                 form.fields[2].insert(&owner);
             }
@@ -1155,7 +1286,7 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                 });
             }
         }
-        FormKind::MintCreate | FormKind::MintMore => {
+        FormKind::MintCreate | FormKind::ConfidentialMint | FormKind::MintMore => {
             anyhow::ensure!(
                 !services.offline,
                 "Online simulation is required for mint operations"
@@ -1180,7 +1311,7 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
             app.busy = Some("Simulating mint operation…".into());
             services.jobs.spawn(async move {
                 let result = async {
-                    if kind == FormKind::MintCreate {
+                    if matches!(kind, FormKind::MintCreate | FormKind::ConfidentialMint) {
                         let decimals: u8 = values[1]
                             .parse()
                             .context("Decimals must be an integer from 0 to 255")?;
@@ -1194,6 +1325,20 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                             &wallet,
                             &wallets,
                             crate::mints::CreateMint {
+                                confidential: if kind == FormKind::ConfidentialMint {
+                                    Some(crate::mints::ConfidentialMintConfig {
+                                        auto_approve: values[6] == "Automatic",
+                                        auditor: if values[7].is_empty() {
+                                            None
+                                        } else {
+                                            Some(values[7].parse().context(
+                                                "Enter a base64 ElGamal auditor public key",
+                                            )?)
+                                        },
+                                    })
+                                } else {
+                                    None
+                                },
                                 program: if values[0] == "Token-2022" {
                                     crate::tokens::TOKEN_2022
                                 } else {
@@ -1244,6 +1389,69 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
                     Err(error) => OperationUpdate::Failed(network::safe_error(error, &profile)),
                 };
                 let _ = sender.send(OperationEvent { session, update }).await;
+            });
+        }
+        FormKind::Confidential(operation) => {
+            anyhow::ensure!(!services.offline, "Online simulation is required");
+            let selected = app
+                .token_operation
+                .clone()
+                .context("Select a confidential account")?;
+            let wallet = app.wallet().context("Select a wallet")?.clone();
+            let wallets = app.wallets.clone();
+            let profile = app.profile().clone();
+            let expected = app.token_genesis.clone();
+            anyhow::ensure!(
+                expected.is_some()
+                    && expected.as_deref() == app.network.as_ref().map(|n| n.genesis.as_str()),
+                "Network changed or unavailable; refresh tokens first"
+            );
+            let session = app.session;
+            let sender = services.local_sender.clone();
+            app.confidential_request = app.confidential_request.wrapping_add(1);
+            let request_id = app.confidential_request;
+            let recipient = if matches!(
+                operation,
+                crate::confidential_operations::Operation::Transfer
+                    | crate::confidential_operations::Operation::Approve
+            ) {
+                values[0].clone()
+            } else {
+                String::new()
+            };
+            let value = values
+                [usize::from(operation == crate::confidential_operations::Operation::Transfer)]
+            .clone();
+            let recipient_is_account = values.get(2).is_some_and(|v| v == "Token account");
+            app.busy = Some("Preparing proofs and simulating confidential operation…".into());
+            services.jobs.spawn(async move {
+                let result = crate::confidential_operations::prepare(
+                    &profile,
+                    &wallet,
+                    &wallets,
+                    &selected,
+                    crate::confidential_operations::Request {
+                        operation,
+                        value,
+                        recipient,
+                        recipient_is_account,
+                    },
+                )
+                .await
+                .and_then(|prepared| {
+                    anyhow::ensure!(
+                        Some(&prepared.genesis) == expected.as_ref(),
+                        "Network changed; refresh and review again"
+                    );
+                    Ok(prepared)
+                });
+                let _ = sender
+                    .send(LocalEvent::ConfidentialPrepared {
+                        session,
+                        request: request_id,
+                        result: result.map(Box::new),
+                    })
+                    .await;
             });
         }
         FormKind::TokenTransfer | FormKind::TokenCreate => {
@@ -1434,6 +1642,14 @@ mod tests {
             );
             app.modal = None;
         }
+        app.modal = Some(Modal::TokenCreation { selected: 2 });
+        handle(&mut app, &mut services, Action::Submit)
+            .await
+            .unwrap();
+        assert!(
+            matches!(&app.modal, Some(Modal::Form(form)) if form.kind == FormKind::ConfidentialMint)
+        );
+        app.modal = None;
         for action in [
             Action::TokenCreation,
             app.key(crossterm::event::KeyEvent::new(
