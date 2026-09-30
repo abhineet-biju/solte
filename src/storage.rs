@@ -13,6 +13,8 @@ use crate::{
 type Reply<T> = oneshot::Sender<Result<T>>;
 
 enum Request {
+    Labels(String, String, Reply<crate::labels::Labels>),
+    SaveLabels(String, String, Vec<crate::labels::Change>, Reply<()>),
     SaveMint(String, String, crate::mints::MintRecord, Reply<()>),
     Mints(String, String, Reply<Vec<crate::mints::MintRecord>>),
     Config(std::path::PathBuf, crate::config::Config, Reply<()>),
@@ -47,6 +49,7 @@ impl Store {
             CREATE INDEX IF NOT EXISTS transaction_order ON transactions(scope, chain, slot DESC);
             CREATE TABLE IF NOT EXISTS cursors(scope TEXT NOT NULL, chain TEXT NOT NULL, address TEXT NOT NULL, signature TEXT NOT NULL, PRIMARY KEY(scope, chain, address));
             CREATE TABLE IF NOT EXISTS mints(endpoint TEXT NOT NULL, chain TEXT NOT NULL, address TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(endpoint, chain, address));
+            CREATE TABLE IF NOT EXISTS asset_labels(endpoint TEXT NOT NULL, chain TEXT NOT NULL, kind TEXT NOT NULL, address TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(endpoint, chain, kind, address));
             CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL);")?;
         let (sender, mut receiver) = mpsc::channel(128);
         std::thread::Builder::new()
@@ -55,6 +58,12 @@ impl Store {
                 let mut conn = conn;
                 while let Some(request) = receiver.blocking_recv() {
                     match request {
+                        Request::Labels(endpoint, chain, reply) => {
+                            let _ = reply.send(load_labels(&conn, &endpoint, &chain));
+                        }
+                        Request::SaveLabels(endpoint, chain, changes, reply) => {
+                            let _ = reply.send(save_labels(&mut conn, &endpoint, &chain, &changes));
+                        }
                         Request::SaveMint(endpoint, chain, record, reply) => {
                             let result = (|| -> Result<()> {
                                 conn.execute("INSERT INTO mints(endpoint,chain,address,payload) VALUES(?1,?2,?3,?4) ON CONFLICT(endpoint,chain,address) DO UPDATE SET payload=excluded.payload", params![endpoint, chain, record.address, serde_json::to_string(&record)?])?;
@@ -95,6 +104,36 @@ impl Store {
                 }
             })?;
         Ok(Self { sender })
+    }
+
+    pub async fn labels(&self, endpoint: &str, chain: &str) -> Result<crate::labels::Labels> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::Labels(
+                scope(endpoint, "labels"),
+                chain.into(),
+                send,
+            ))
+            .await?;
+        receive.await?
+    }
+
+    pub async fn save_labels(
+        &self,
+        endpoint: &str,
+        chain: &str,
+        changes: Vec<crate::labels::Change>,
+    ) -> Result<()> {
+        let (send, receive) = oneshot::channel();
+        self.sender
+            .send(Request::SaveLabels(
+                scope(endpoint, "labels"),
+                chain.into(),
+                changes,
+                send,
+            ))
+            .await?;
+        receive.await?
     }
 
     pub async fn save_mint(
@@ -205,6 +244,55 @@ pub fn scope(endpoint: &str, address: &str) -> String {
     format!("{:x}:{address}", Sha256::digest(endpoint.as_bytes()))
 }
 
+fn load_labels(conn: &Connection, endpoint: &str, chain: &str) -> Result<crate::labels::Labels> {
+    let mut labels = crate::labels::Labels::default();
+    let mut stmt =
+        conn.prepare("SELECT kind,address,label FROM asset_labels WHERE endpoint=?1 AND chain=?2")?;
+    let rows = stmt.query_map(params![endpoint, chain], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (kind, address, raw) = row?;
+        let Some(label) = crate::labels::normalize(&raw).ok().flatten() else {
+            continue;
+        };
+        match kind.as_str() {
+            "mint" => {
+                labels.mints.insert(address, label);
+            }
+            "account" => {
+                labels.accounts.insert(address, label);
+            }
+            _ => {}
+        }
+    }
+    Ok(labels)
+}
+
+fn save_labels(
+    conn: &mut Connection,
+    endpoint: &str,
+    chain: &str,
+    changes: &[crate::labels::Change],
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    for change in changes {
+        if let Some(label) = &change.label {
+            let label = crate::labels::normalize(label)?
+                .ok_or_else(|| anyhow!("Empty name must be cleared"))?;
+            tx.execute("INSERT INTO asset_labels(endpoint,chain,kind,address,label) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(endpoint,chain,kind,address) DO UPDATE SET label=excluded.label", params![endpoint, chain, change.kind.key(), change.address, label])?;
+        } else {
+            tx.execute("DELETE FROM asset_labels WHERE endpoint=?1 AND chain=?2 AND kind=?3 AND address=?4", params![endpoint, chain, change.kind.key(), change.address])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 fn load(conn: &Connection, scope: &str, limit: usize) -> Result<Vec<TransactionRecord>> {
     let mut stmt = conn.prepare("SELECT payload FROM transactions WHERE scope=?1 AND chain=(SELECT chain FROM networks WHERE scope=?1) ORDER BY slot DESC LIMIT ?2")?;
     let rows = stmt.query_map(params![scope, limit as i64], |r| r.get::<_, String>(0))?;
@@ -273,6 +361,96 @@ fn load_logs(conn: &Connection, scope: &str) -> Result<Vec<LogEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn asset_names_persist_with_separate_project_rpc_network_and_kind_scopes() {
+        use crate::labels::{Change, Kind};
+        let root = tempfile::tempdir().unwrap();
+        let other_root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let changes = vec![
+            Change {
+                kind: Kind::Mint,
+                address: "same-address".into(),
+                label: Some("Dev USD".into()),
+            },
+            Change {
+                kind: Kind::Account,
+                address: "same-address".into(),
+                label: Some("Alice balance".into()),
+            },
+        ];
+        store
+            .save_labels("rpc-a", "chain-a", changes)
+            .await
+            .unwrap();
+        let reopened = Store::open(root.path()).unwrap();
+        let names = reopened.labels("rpc-a", "chain-a").await.unwrap();
+        assert_eq!(names.mints["same-address"], "Dev USD");
+        assert_eq!(names.accounts["same-address"], "Alice balance");
+        assert!(
+            reopened
+                .labels("rpc-b", "chain-a")
+                .await
+                .unwrap()
+                .mints
+                .is_empty()
+        );
+        assert!(
+            reopened
+                .labels("rpc-a", "chain-b")
+                .await
+                .unwrap()
+                .mints
+                .is_empty()
+        );
+        assert!(
+            Store::open(other_root.path())
+                .unwrap()
+                .labels("rpc-a", "chain-a")
+                .await
+                .unwrap()
+                .mints
+                .is_empty()
+        );
+        reopened
+            .save_labels(
+                "rpc-a",
+                "chain-a",
+                vec![Change {
+                    kind: Kind::Mint,
+                    address: "same-address".into(),
+                    label: None,
+                }],
+            )
+            .await
+            .unwrap();
+        let names = reopened.labels("rpc-a", "chain-a").await.unwrap();
+        assert!(names.mints.is_empty());
+        assert_eq!(names.accounts["same-address"], "Alice balance");
+        let bad_batch = vec![
+            Change {
+                kind: Kind::Account,
+                address: "same-address".into(),
+                label: Some("Changed".into()),
+            },
+            Change {
+                kind: Kind::Mint,
+                address: "other".into(),
+                label: Some("Invalid\nname".into()),
+            },
+        ];
+        assert!(
+            reopened
+                .save_labels("rpc-a", "chain-a", bad_batch)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            reopened.labels("rpc-a", "chain-a").await.unwrap().accounts["same-address"],
+            "Alice balance"
+        );
+    }
 
     #[tokio::test]
     async fn deduplicates_transactions_and_separates_cluster_resets() {

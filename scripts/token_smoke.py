@@ -24,7 +24,22 @@ def main():
             terminal.send(b"M")
             mint = terminal.clipboard()
             assert account != mint
+            terminal.click_text("Name [L]", "Name mint & account locally")
+            terminal.send(b"Demo USD\tBuyer balance\r", "Token account inspector")
+            terminal.wait_text("Demo USD")
+            terminal.send(b"M")
+            assert terminal.clipboard() == mint, "Local names must preserve the copied mint address"
             terminal.escape("Token account inspector")
+            terminal.send(b"/", "Filter token accounts")
+            terminal.send(b"Buyer balance\r", "Filter: Buyer balance")
+            terminal.send(b"\r", "Token account inspector")
+            terminal.send(b"y")
+            assert terminal.clipboard() == account, "Account names should find the same account"
+            terminal.send(b"L", "Name mint & account locally")
+            terminal.send(b"\x15\t\x15\r", "Token account inspector")
+            terminal.wait_for(lambda: "Demo USD" not in terminal.text, "cleared local names")
+            terminal.escape("Token account inspector")
+            terminal.send(b"x")
             terminal.send(b"/", "Filter token accounts")
             terminal.send(b"Token-2022\r", "Filter: Token-2022")
             terminal.send(b"\r", "Token account inspector")
@@ -67,6 +82,8 @@ def main():
             terminal.send(b"v", "Project mints")
             terminal.send(b"j\r", "Mint inspector")
             terminal.wait_text("Mint more [m]")
+            terminal.wait_text("View ATA [t]")
+            assert "Create ATA [a]" not in terminal.text, "An existing ATA should offer inspection"
             terminal.send(b"y")
             project_mint = terminal.clipboard()
             assert len(project_mint) >= 32
@@ -83,7 +100,7 @@ def main():
             terminal.process.wait(timeout=5)
             assert terminal.process.returncode == 0
             assert not (root / ".solte").exists(), "Demo token workflow must not create project wallet data"
-            print("PASS: token selection, copying, filtering, JSON export, mint creation, project mints, minting, mouse, resizing, and exit")
+            print("PASS: token inspection, local names, copying, filtering, JSON export, mint creation, existing ATA actions, mouse, resizing, and exit")
 
 
 if __name__ == "__main__":

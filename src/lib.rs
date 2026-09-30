@@ -6,6 +6,7 @@ pub mod config;
 pub mod demo;
 pub mod funding;
 mod keyfile;
+pub mod labels;
 pub mod mints;
 pub mod model;
 pub mod network;

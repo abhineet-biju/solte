@@ -1264,6 +1264,15 @@ impl Ui {
             Modal::TokenCreation { .. } => 10,
             Modal::Appearance { .. } => 10,
             Modal::Funding { .. } => 15,
+            Modal::Form(form)
+                if screen.width >= 96
+                    && matches!(
+                        form.kind,
+                        crate::app::FormKind::MintCreate | crate::app::FormKind::ConfidentialMint
+                    ) =>
+            {
+                (form.fields.len().div_ceil(2) * 3 + 11) as u16
+            }
             Modal::Form(form) => (form.fields.len() * 3 + 10) as u16,
             Modal::Profiles { .. } => (app.config.profiles.len() * 2 + 7) as u16,
             _ => screen
@@ -1344,57 +1353,7 @@ impl Ui {
                 }
             }
             Modal::ProjectMints { selected } => {
-                if app.project_mints.is_empty() {
-                    frame.render_widget(Paragraph::new("No project mints yet. Create one with [c] in Tokens.\nMints are remembered on this RPC and network, across project wallets.").wrap(Wrap { trim: false }), inner);
-                } else {
-                    let count = inner.height.saturating_sub(2).max(1) as usize;
-                    let offset = selected.saturating_sub(count - 1);
-                    for (row, (index, mint)) in app
-                        .project_mints
-                        .iter()
-                        .enumerate()
-                        .skip(offset)
-                        .take(count)
-                        .enumerate()
-                    {
-                        let label = format!(
-                            "{} · {} · {} decimals · {}{}",
-                            short(&mint.record.address),
-                            if mint.record.program == crate::tokens::TOKEN_2022 {
-                                "Token-2022"
-                            } else {
-                                "SPL Token"
-                            },
-                            mint.record.decimals,
-                            if mint.info.is_some() {
-                                "Ready"
-                            } else {
-                                "Unavailable"
-                            },
-                            if mint.info.as_ref().is_some_and(|info| {
-                                crate::confidential::extension(info, "confidentialTransferMint")
-                                    .is_some()
-                            }) {
-                                " · CT"
-                            } else {
-                                ""
-                            }
-                        );
-                        self.button(
-                            frame,
-                            Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
-                            &label,
-                            Action::SelectMint(index),
-                            theme,
-                            index == *selected,
-                        );
-                    }
-                    frame.render_widget(
-                        Paragraph::new("[j]/[k] Select · [Enter] Inspect · [r] Refresh")
-                            .style(Style::default().fg(theme.muted)),
-                        Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-                    );
-                }
+                self.project_mints(frame, app, *selected, inner, theme)
             }
             Modal::Mint { mint, scroll } => {
                 let body = Rect::new(
@@ -1457,6 +1416,7 @@ impl Ui {
                         ("Copy mint [y]", Action::CopyToken(true)),
                         ("Explorer [o]", Action::ExplorerToken(true)),
                         ("Refresh [r]", Action::Refresh),
+                        ("Name [L]", Action::NameAsset),
                     ],
                     theme,
                 );
@@ -1485,6 +1445,7 @@ impl Ui {
                 {
                     primary.push(("Mint more [m]", Action::MintMore));
                 }
+                primary.push(("Name [L]", Action::NameAsset));
                 self.token_buttons(
                     frame,
                     Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
@@ -1723,7 +1684,8 @@ impl Ui {
                     crate::app::FormKind::TokenCreate => "Creates the recipient wallet’s associated account for this mint. Payer covers rent.",
                     crate::app::FormKind::TokenTransfer => "Amount uses mint decimals. Wallet destinations create an ATA if missing; explicit token accounts must already exist.",
                     crate::app::FormKind::TokenExport => "Exports public account data only. Existing files are never overwritten.",
-                    crate::app::FormKind::TokenSearch => "Search mint, account, program, state, or delegate. Empty clears the filter.",
+                    crate::app::FormKind::MintName | crate::app::FormKind::TokenNames => "Local to this project and network. Up to 40 characters; leave blank to clear. Addresses remain visible.",
+                    crate::app::FormKind::TokenSearch => "Search local names, mint, account, program, state, or delegate. Empty clears the filter.",
                     crate::app::FormKind::Search | crate::app::FormKind::LogSearch => {
                         "Leave empty to show all captured transactions."
                     }
@@ -2035,7 +1997,8 @@ impl Ui {
                     "[c] Create menu: token mint or associated account",
                     "[v] Project mints, including zero-supply mints without accounts",
                     "Inspector: [m] Mint more when its authority is loaded",
-                    "Mint inspector: [t] View active wallet’s token account",
+                    "Mint inspector: [t] View ATA; [a] Create ATA when missing",
+                    "Inspector: [L] Name mint/account locally; blank clears the name",
                     "Mint creation: program, decimals, authorities, initial supply",
                     "Mint authority can be a different loaded project wallet.",
                     "Transfer destination: wallet/create ATA or explicit token account",

@@ -25,6 +25,10 @@ pub struct TokenAccount {
     pub slot: u64,
     pub account: Value,
     pub mint_info: Option<Value>,
+    #[serde(skip)]
+    pub mint_label: Option<String>,
+    #[serde(skip)]
+    pub account_label: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +37,8 @@ pub struct Snapshot {
     pub accounts: Vec<TokenAccount>,
     pub mints: Vec<crate::mints::ProjectMint>,
     pub warnings: Vec<String>,
+    pub labels: crate::labels::Labels,
+    pub labels_revision: u64,
 }
 
 pub fn associated_address(owner: &Pubkey, mint: &Pubkey, program: &Pubkey) -> Pubkey {
@@ -96,6 +102,9 @@ impl TokenAccount {
         &self.account["data"]["parsed"]["info"]
     }
     pub fn label(&self) -> String {
+        if let Some(label) = &self.mint_label {
+            return crate::model::clean_text(label);
+        }
         self.mint_info
             .as_ref()
             .and_then(|info| info["extensions"].as_array())
@@ -181,6 +190,12 @@ impl TokenAccount {
             String::new(),
             "MINT DETAILS".into(),
         ];
+        if let Some(label) = &self.account_label {
+            lines.insert(
+                8,
+                format!("Local name  {}", crate::model::clean_text(label)),
+            );
+        }
         if let Some(mint) = &self.mint_info {
             for (name, key) in [
                 ("Supply · raw", "supply"),
@@ -278,6 +293,8 @@ pub fn decode(address: &str, account: Value, owner: &Pubkey, slot: u64) -> Resul
         slot,
         account,
         mint_info: None,
+        mint_label: None,
+        account_label: None,
     })
 }
 
@@ -372,6 +389,8 @@ pub async fn fetch(rpc: &RpcClient, owner: &Pubkey) -> Result<Snapshot> {
         accounts,
         mints: vec![],
         warnings,
+        labels: crate::labels::Labels::default(),
+        labels_revision: 0,
     })
 }
 

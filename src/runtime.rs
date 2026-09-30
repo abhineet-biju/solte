@@ -28,6 +28,13 @@ use crate::{
 };
 
 enum LocalEvent {
+    Names {
+        session: u64,
+        genesis: String,
+        target: crate::labels::Target,
+        changes: Vec<crate::labels::Change>,
+        result: Result<()>,
+    },
     ConfidentialPrepared {
         session: u64,
         request: u64,
@@ -71,6 +78,10 @@ impl Services {
         app.confidential_request = app.confidential_request.wrapping_add(1);
         app.project_mints.clear();
         app.mint_receipt = None;
+        app.asset_labels = crate::labels::Labels::default();
+        app.asset_labels_genesis = None;
+        app.asset_labels_revision = 0;
+        app.naming_target = None;
         app.token_cursor = 0;
         app.token_loading = false;
         app.token_refresh_after = false;
@@ -123,6 +134,7 @@ impl Services {
         let owner = wallet.address.clone();
         let profile = app.profile().clone();
         let session = app.session;
+        let labels_revision = app.asset_labels_revision;
         let sender = self.local_sender.clone();
         let store = self.store.clone();
         app.token_loading = true;
@@ -134,6 +146,8 @@ impl Services {
                     crate::tokens::fetch(&network::client(&profile), &owner.parse()?).await?;
                 let records = store.mints(&profile.http, &snapshot.genesis).await?;
                 snapshot.mints = crate::mints::fetch(&profile, &snapshot.genesis, records).await?;
+                snapshot.labels = store.labels(&profile.http, &snapshot.genesis).await?;
+                snapshot.labels_revision = labels_revision;
                 Ok::<_, anyhow::Error>(snapshot)
             }
             .await
@@ -301,7 +315,7 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                         if let Some(mut record) = app.mint_receipt.take() {
                             app.switch_view(crate::app::View::Tokens);
                             record.signature = signature.clone();
-                            app.modal = Some(Modal::Mint { mint: Box::new(crate::mints::ProjectMint { record, info: None, error: Some("Confirmed. Refreshing mint details…".into()) }), scroll: 0 });
+                            app.modal = Some(Modal::Mint { mint: Box::new(crate::mints::ProjectMint { record, info: None, error: Some("Confirmed. Refreshing mint details…".into()), label: None }), scroll: 0 });
                         }
                         if app.view == crate::app::View::Tokens { app.token_refresh_after = app.token_loading; services.load_tokens(&mut app); } app.busy = None; app.status = "Transaction confirmed · press [o] to open explorer".into(); app.last_signature = Some(signature.clone()); app.log("INFO", format!("Confirmed {signature}")); services.command(Command::Refresh); },
                     OperationUpdate::Exported(path) => { app.busy = None; app.status = format!("Signed transaction exported to {path} · not submitted"); app.log("INFO", app.status.clone()); },
@@ -340,6 +354,9 @@ pub async fn run(mut app: App, offline: bool) -> Result<()> {
                     if session == app.session && app.token_refresh_after {
                         app.token_refresh_after = false; services.load_tokens(&mut app);
                     }
+                },
+                LocalEvent::Names { session, genesis, target, changes, result } => {
+                    finish_names(&mut app, session, &genesis, target, changes, result);
                 },
                 LocalEvent::Wallet(result) => {
                     app.busy = None;
@@ -393,7 +410,7 @@ fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens:
     }
     app.token_loading = false;
     match result {
-        Ok(snapshot) => {
+        Ok(mut snapshot) => {
             if app
                 .network
                 .as_ref()
@@ -403,6 +420,14 @@ fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens:
                 return;
             }
             let selected = app.selected_token().map(|a| a.address.clone());
+            if app.asset_labels_genesis.as_deref() != Some(&snapshot.genesis)
+                || app.asset_labels_revision == snapshot.labels_revision
+            {
+                app.asset_labels = snapshot.labels;
+                app.asset_labels_genesis = Some(snapshot.genesis.clone());
+            }
+            app.asset_labels
+                .apply(&mut snapshot.accounts, &mut snapshot.mints);
             app.project_mints = snapshot.mints;
             if let Some(Modal::Mint { mint, .. }) = &mut app.modal
                 && let Some(current) = app
@@ -414,6 +439,14 @@ fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens:
             }
             if let Some(Modal::ProjectMints { selected }) = &mut app.modal {
                 *selected = (*selected).min(app.project_mints.len().saturating_sub(1));
+            }
+            if let Some(Modal::Token { account, .. }) = &mut app.modal
+                && let Some(current) = snapshot
+                    .accounts
+                    .iter()
+                    .find(|a| a.address == account.address)
+            {
+                **account = current.clone();
             }
             app.confidential_balances = None;
             if let Some(Modal::Confidential { account, selected }) = &mut app.modal {
@@ -460,6 +493,71 @@ fn apply_token_update(app: &mut App, session: u64, result: Result<crate::tokens:
             app.status = format!("Token refresh failed: {error}");
         }
     }
+}
+
+fn finish_names(
+    app: &mut App,
+    session: u64,
+    genesis: &str,
+    target: crate::labels::Target,
+    changes: Vec<crate::labels::Change>,
+    result: Result<()>,
+) {
+    if session != app.session {
+        return;
+    }
+    app.busy = None;
+    if app.token_genesis.as_deref() != Some(genesis)
+        || app
+            .network
+            .as_ref()
+            .is_some_and(|network| network.genesis != genesis)
+    {
+        app.status = "Network changed while saving names; refresh its assets".into();
+        return;
+    }
+    if let Err(error) = result {
+        report_error(app, format!("Could not save local names: {error}"));
+        return;
+    }
+    app.asset_labels.update(&changes);
+    app.asset_labels_revision = app.asset_labels_revision.wrapping_add(1);
+    if app.asset_labels_genesis.is_none() {
+        app.asset_labels_genesis = app.token_genesis.clone();
+    }
+    app.asset_labels
+        .apply(&mut app.tokens, &mut app.project_mints);
+    let reopen = app.naming_target.as_ref() == Some(&target)
+        && matches!(&app.modal, Some(Modal::Form(form)) if matches!(form.kind, FormKind::MintName | FormKind::TokenNames));
+    app.naming_target = None;
+    if reopen {
+        app.modal = if let Some(address) = &target.account {
+            app.tokens
+                .iter()
+                .find(|a| &a.address == address)
+                .map(|account| Modal::Token {
+                    account: Box::new(account.clone()),
+                    scroll: 0,
+                })
+        } else {
+            app.project_mints
+                .iter()
+                .find(|m| m.record.address == target.mint)
+                .map(|mint| Modal::Mint {
+                    mint: Box::new(mint.clone()),
+                    scroll: 0,
+                })
+        };
+    }
+    app.token_cursor = app
+        .token_cursor
+        .min(app.visible_tokens().len().saturating_sub(1));
+    app.status = if app.demo {
+        "Local names updated for this demo session"
+    } else {
+        "Local names saved for this project and network"
+    }
+    .into();
 }
 
 fn report_error(app: &mut App, message: String) {
@@ -543,6 +641,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 | Action::CreateConfidentialMint
                 | Action::Confidential
                 | Action::MintMore
+                | Action::NameAsset
                 | Action::ImportTransaction
                 | Action::Submit
         )
@@ -550,6 +649,40 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
         bail!("Wait for the current operation to finish");
     }
     match action {
+        Action::NameAsset => {
+            let (target, values) = match &app.modal {
+                Some(Modal::Mint { mint, .. }) => (
+                    crate::labels::Target {
+                        mint: mint.record.address.clone(),
+                        account: None,
+                    },
+                    vec![mint.label.clone().unwrap_or_default()],
+                ),
+                Some(Modal::Token { account, .. }) => (
+                    crate::labels::Target {
+                        mint: account.mint.clone(),
+                        account: Some(account.address.clone()),
+                    },
+                    vec![
+                        account.mint_label.clone().unwrap_or_default(),
+                        account.account_label.clone().unwrap_or_default(),
+                    ],
+                ),
+                _ => bail!("Open a mint or token account inspector to name it"),
+            };
+            app.open_form(if target.account.is_some() {
+                FormKind::TokenNames
+            } else {
+                FormKind::MintName
+            });
+            if let Some(Modal::Form(form)) = &mut app.modal {
+                for (field, value) in form.fields.iter_mut().zip(values) {
+                    field.value = value;
+                    field.cursor = field.value.len();
+                }
+            }
+            app.naming_target = Some(target);
+        }
         Action::Confidential => {
             let account = match &app.modal {
                 Some(Modal::Token { account, .. }) => account.as_ref(),
@@ -1165,6 +1298,54 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
         return Ok(());
     }
     if let Some(Modal::Form(form)) = &app.modal
+        && matches!(form.kind, FormKind::MintName | FormKind::TokenNames)
+    {
+        let target = app
+            .naming_target
+            .clone()
+            .context("Reopen the inspector to name this asset")?;
+        let values = form
+            .fields
+            .iter()
+            .map(|field| field.value.clone())
+            .collect::<Vec<_>>();
+        let changes = crate::labels::changes(&target, &values)?;
+        let genesis = app
+            .token_genesis
+            .clone()
+            .context("Refresh token discovery before naming assets")?;
+        if app.demo {
+            finish_names(app, app.session, &genesis, target, changes, Ok(()));
+        } else {
+            anyhow::ensure!(
+                app.network
+                    .as_ref()
+                    .is_none_or(|network| network.genesis == genesis),
+                "Network changed; refresh before naming assets"
+            );
+            let endpoint = app.profile().http.clone();
+            let session = app.session;
+            let sender = services.local_sender.clone();
+            let store = services.store.clone();
+            app.busy = Some("Saving local names…".into());
+            services.jobs.spawn(async move {
+                let result = store
+                    .save_labels(&endpoint, &genesis, changes.clone())
+                    .await;
+                let _ = sender
+                    .send(LocalEvent::Names {
+                        session,
+                        genesis,
+                        target,
+                        changes,
+                        result,
+                    })
+                    .await;
+            });
+        }
+        return Ok(());
+    }
+    if let Some(Modal::Form(form)) = &app.modal
         && form.kind == FormKind::TokenExport
     {
         let account = app
@@ -1569,6 +1750,7 @@ async fn submit_form(app: &mut App, services: &mut Services) -> Result<()> {
             services.restart(app);
         }
         FormKind::TokenExport => unreachable!(),
+        FormKind::MintName | FormKind::TokenNames => unreachable!(),
         FormKind::Search | FormKind::LogSearch | FormKind::TokenSearch => {
             app.filter = values[0].clone();
             app.transaction_cursor = 0;
@@ -1590,6 +1772,226 @@ mod tests {
     use super::*;
 
     #[test]
+    fn name_refreshes_load_other_windows_changes_without_overwriting_new_saves() {
+        let mut app = App::new("/fixture".into(), crate::config::Config::default(), vec![]);
+        crate::demo::populate(&mut app);
+        let target = crate::labels::Target {
+            mint: app.tokens[0].mint.clone(),
+            account: None,
+        };
+        let mut labels = crate::labels::Labels::default();
+        labels.update(&crate::labels::changes(&target, &["Initial name".into()]).unwrap());
+        let snapshot = crate::tokens::Snapshot {
+            genesis: network::DEVNET_GENESIS.into(),
+            accounts: app.tokens.clone(),
+            mints: app.project_mints.clone(),
+            warnings: vec![],
+            labels,
+            labels_revision: 0,
+        };
+        apply_token_update(&mut app, 0, Ok(snapshot.clone()));
+        assert_eq!(app.tokens[0].label(), "Initial name");
+        let changes = crate::labels::changes(&target, &["New local name".into()]).unwrap();
+        finish_names(
+            &mut app,
+            0,
+            network::DEVNET_GENESIS,
+            target.clone(),
+            changes,
+            Ok(()),
+        );
+        apply_token_update(&mut app, 0, Ok(snapshot.clone()));
+        assert_eq!(app.tokens[0].label(), "New local name");
+        let mut fresh = snapshot;
+        fresh.labels_revision = app.asset_labels_revision;
+        fresh.labels.update(
+            &crate::labels::changes(&target, &["Name from another window".into()]).unwrap(),
+        );
+        apply_token_update(&mut app, 0, Ok(fresh));
+        assert_eq!(app.tokens[0].label(), "Name from another window");
+    }
+
+    #[tokio::test]
+    async fn local_names_save_without_signing_survive_refresh_and_clear_to_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            directory.path().into(),
+            crate::config::Config::default(),
+            vec![],
+        );
+        crate::demo::populate(&mut app);
+        app.demo = false;
+        app.network = None;
+        let original = app.tokens[0].clone();
+        app.modal = Some(Modal::Token {
+            account: Box::new(original.clone()),
+            scroll: 0,
+        });
+        let (network_sender, _) = mpsc::channel(1);
+        let (operation_sender, mut operation_receiver) = mpsc::channel(1);
+        let (local_sender, mut local_receiver) = mpsc::channel(1);
+        let mut services = Services {
+            store: Store::open(directory.path()).unwrap(),
+            network_sender,
+            operation_sender,
+            local_sender,
+            monitor: None,
+            jobs: JoinSet::new(),
+            offline: true,
+        };
+        let mut ui = Ui::default();
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 10)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        let hit = ui
+            .hits
+            .iter()
+            .find(|hit| hit.action == Action::NameAsset)
+            .unwrap();
+        let mouse = ui.click(&mut app, hit.area.x, hit.area.y).unwrap();
+        assert_eq!(
+            mouse,
+            app.key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('L'),
+                crossterm::event::KeyModifiers::SHIFT
+            ))
+            .unwrap()
+        );
+        handle(&mut app, &mut services, mouse).await.unwrap();
+        let Some(Modal::Form(form)) = &mut app.modal else {
+            panic!("Expected naming form")
+        };
+        form.fields[0].value = "Dev USD".into();
+        form.fields[1].value = "Alice test balance".into();
+        submit_form(&mut app, &mut services).await.unwrap();
+        let LocalEvent::Names {
+            session,
+            genesis,
+            target,
+            changes,
+            result,
+        } = local_receiver.recv().await.unwrap()
+        else {
+            panic!("Expected saved names")
+        };
+        finish_names(&mut app, session, &genesis, target, changes, result);
+        assert!(app.busy.is_none());
+        assert!(
+            operation_receiver.try_recv().is_err(),
+            "Local naming must not prepare or sign a transaction"
+        );
+        let current = app
+            .tokens
+            .iter()
+            .find(|account| account.address == original.address)
+            .unwrap();
+        assert_eq!(current.label(), "Dev USD");
+        assert_eq!(current.account_label.as_deref(), Some("Alice test balance"));
+        assert_eq!(current.mint, original.mint);
+        assert_eq!(current.account, original.account);
+        assert!(
+            serde_json::to_value(current)
+                .unwrap()
+                .get("mint_label")
+                .is_none()
+        );
+        app.token_filter = "alice test".into();
+        assert_eq!(app.visible_tokens().len(), 1);
+        app.token_filter.clear();
+        let mut accounts = app.tokens.clone();
+        for account in &mut accounts {
+            account.mint_label = None;
+            account.account_label = None;
+        }
+        let stale_snapshot = crate::tokens::Snapshot {
+            genesis: network::DEVNET_GENESIS.into(),
+            accounts,
+            mints: app.project_mints.clone(),
+            warnings: vec![],
+            labels: crate::labels::Labels::default(),
+            labels_revision: 0,
+        };
+        let session = app.session;
+        apply_token_update(&mut app, session, Ok(stale_snapshot.clone()));
+        assert!(
+            matches!(&app.modal, Some(Modal::Token { account, .. }) if account.label() == "Dev USD")
+        );
+        assert_eq!(
+            app.project_mints
+                .iter()
+                .find(|mint| mint.record.address == original.mint)
+                .unwrap()
+                .display_name(),
+            "Dev USD"
+        );
+        let store = Store::open(directory.path()).unwrap();
+        assert_eq!(
+            store
+                .labels(&app.profile().http, network::DEVNET_GENESIS)
+                .await
+                .unwrap()
+                .mints[&original.mint],
+            "Dev USD"
+        );
+        handle(&mut app, &mut services, Action::NameAsset)
+            .await
+            .unwrap();
+        let Some(Modal::Form(form)) = &mut app.modal else {
+            panic!("Expected naming form")
+        };
+        assert_eq!(form.fields[0].value, "Dev USD");
+        for field in &mut form.fields {
+            field.value.clear();
+        }
+        submit_form(&mut app, &mut services).await.unwrap();
+        let LocalEvent::Names {
+            session,
+            genesis,
+            target,
+            changes,
+            result,
+        } = local_receiver.recv().await.unwrap()
+        else {
+            panic!("Expected cleared names")
+        };
+        finish_names(&mut app, session, &genesis, target, changes, result);
+        assert!(
+            matches!(&app.modal, Some(Modal::Token { account, .. }) if account.label() == original.label() && account.account_label.is_none())
+        );
+        assert!(
+            store
+                .labels(&app.profile().http, network::DEVNET_GENESIS)
+                .await
+                .unwrap()
+                .mints
+                .is_empty()
+        );
+        let target = crate::labels::Target {
+            mint: original.mint,
+            account: None,
+        };
+        let changes = crate::labels::changes(&target, &["Stale result".into()]).unwrap();
+        finish_names(
+            &mut app,
+            session + 1,
+            network::DEVNET_GENESIS,
+            target.clone(),
+            changes.clone(),
+            Ok(()),
+        );
+        assert!(app.asset_labels.mints.is_empty());
+        finish_names(
+            &mut app,
+            session,
+            "different-chain",
+            target,
+            changes,
+            Ok(()),
+        );
+        assert!(app.asset_labels.mints.is_empty());
+    }
+
+    #[test]
     fn token_updates_retain_selection_and_ignore_old_sessions_or_networks() {
         let mut app = App::new("/fixture".into(), crate::config::Config::default(), vec![]);
         crate::demo::populate(&mut app);
@@ -1601,6 +2003,8 @@ mod tests {
             accounts: app.tokens.iter().rev().cloned().collect(),
             mints: vec![],
             warnings: vec![],
+            labels: crate::labels::Labels::default(),
+            labels_revision: 0,
         };
         app.token_loading = true;
         apply_token_update(&mut app, 2, Ok(snapshot.clone()));

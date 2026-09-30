@@ -18,6 +18,21 @@ fn main() -> anyhow::Result<()> {
     app.tokens[2].mint_info.as_mut().unwrap()["extensions"] = json!([
         {"extension":"confidentialTransferMint","state":{"authority":app.tokens[2].authority,"autoApproveNewAccounts":true,"auditorElgamalPubkey":null}}
     ]);
+    let named = solte::labels::Target {
+        mint: app.tokens[2].mint.clone(),
+        account: Some(app.tokens[2].address.clone()),
+    };
+    app.project_mints
+        .iter_mut()
+        .find(|mint| mint.record.address == named.mint)
+        .unwrap()
+        .info = app.tokens[2].mint_info.clone();
+    app.asset_labels.update(&solte::labels::changes(
+        &named,
+        &["Dev USD".into(), "Alice test balance".into()],
+    )?);
+    app.asset_labels
+        .apply(&mut app.tokens, &mut app.project_mints);
     app.switch_view(View::Tokens);
     app.token_cursor = 2;
     for (width, height) in [(60, 10), (80, 20), (100, 28), (160, 48)] {
@@ -25,6 +40,30 @@ fn main() -> anyhow::Result<()> {
         ui::snapshot(
             &app,
             &output.join(format!("solte-ct-list-{width}.svg")),
+            width,
+            height,
+        )?;
+        app.modal = Some(Modal::ProjectMints {
+            selected: app
+                .project_mints
+                .iter()
+                .position(|mint| mint.record.address == named.mint)
+                .unwrap(),
+        });
+        ui::snapshot(
+            &app,
+            &output.join(format!("solte-project-mints-{width}.svg")),
+            width,
+            height,
+        )?;
+        app.open_form(solte::app::FormKind::TokenNames);
+        if let Some(Modal::Form(form)) = &mut app.modal {
+            form.fields[0].value = "Dev USD".into();
+            form.fields[1].value = "Alice test balance".into();
+        }
+        ui::snapshot(
+            &app,
+            &output.join(format!("solte-local-names-{width}.svg")),
             width,
             height,
         )?;

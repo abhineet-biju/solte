@@ -14,6 +14,103 @@ use crate::{
 };
 
 impl Ui {
+    pub(super) fn project_mints(
+        &mut self,
+        frame: &mut Frame,
+        app: &App,
+        selected: usize,
+        inner: Rect,
+        theme: Theme,
+    ) {
+        if app.project_mints.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No project mints yet. Create one with [c] in Tokens.\n\nMints are remembered on this RPC and network, across project wallets.")
+                    .wrap(Wrap { trim: false }).style(Style::default().fg(theme.muted)),
+                inner,
+            );
+            return;
+        }
+        let row_height = if inner.height >= 13 {
+            3
+        } else if inner.height >= 8 {
+            2
+        } else {
+            1
+        };
+        let count = (inner.height.saturating_sub(2) / row_height).max(1) as usize;
+        let offset = selected.saturating_sub(count - 1);
+        for (row, (index, mint)) in app
+            .project_mints
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(count)
+            .enumerate()
+        {
+            let y = inner.y + row as u16 * row_height;
+            let style = if index == selected {
+                theme.selected_control()
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            };
+            let area = Rect::new(inner.x, y, inner.width, row_height.min(2));
+            frame.render_widget(Paragraph::new("").style(style), area);
+            let name = if row_height == 1 && mint.label.is_some() {
+                format!("{} · {}", short(&mint.record.address), mint.display_name())
+            } else {
+                mint.display_name()
+            };
+            frame.render_widget(
+                Paragraph::new(name).style(style),
+                Rect::new(inner.x, y, inner.width.saturating_sub(14), 1),
+            );
+            frame.render_widget(
+                Paragraph::new(if mint.record.program == crate::tokens::TOKEN_2022 {
+                    "Token-2022"
+                } else {
+                    "SPL Token"
+                })
+                .style(style)
+                .alignment(Alignment::Right),
+                Rect::new(inner.right().saturating_sub(13), y, 13, 1),
+            );
+            if row_height > 1 {
+                let confidential = mint.info.as_ref().is_some_and(|info| {
+                    crate::confidential::extension(info, "confidentialTransferMint").is_some()
+                });
+                let address = if mint.label.is_some() {
+                    format!("{} · ", short(&mint.record.address))
+                } else {
+                    String::new()
+                };
+                let detail = format!(
+                    "{address}{} decimals · {}{}",
+                    mint.record.decimals,
+                    if mint.info.is_some() {
+                        "Ready"
+                    } else {
+                        "Unavailable"
+                    },
+                    if confidential { " · CT" } else { "" }
+                );
+                frame.render_widget(
+                    Paragraph::new(detail).style(if index == selected {
+                        style
+                    } else {
+                        style.fg(theme.muted)
+                    }),
+                    Rect::new(inner.x, y + 1, inner.width, 1),
+                );
+            }
+            self.target(area, Action::SelectMint(index));
+        }
+        frame.render_widget(
+            Paragraph::new("[j]/[k] Select · [Enter] Inspect · [r] Refresh")
+                .style(Style::default().fg(theme.muted)),
+            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+        );
+    }
+
     pub(super) fn confidential_menu(
         &mut self,
         frame: &mut Frame,
@@ -353,6 +450,12 @@ impl Ui {
                         Style::default().fg(theme.muted),
                     ));
                 }
+                if let Some(label) = &account.account_label {
+                    spans.push(Span::styled(
+                        format!(" · {}", crate::model::clean_text(label)),
+                        Style::default().fg(theme.text),
+                    ));
+                }
                 if !detailed {
                     spans.push(Span::styled(
                         format!(
@@ -537,6 +640,8 @@ mod tests {
                 crate::app::FormKind::TokenCreate,
                 crate::app::FormKind::MintCreate,
                 crate::app::FormKind::MintMore,
+                crate::app::FormKind::MintName,
+                crate::app::FormKind::TokenNames,
                 crate::app::FormKind::TokenTransfer,
                 crate::app::FormKind::TokenExport,
                 crate::app::FormKind::TokenSearch,
@@ -608,6 +713,7 @@ mod tests {
                 Action::CopyToken(true),
                 Action::ExportToken,
                 Action::ExplorerToken(false),
+                Action::NameAsset,
             ] {
                 assert!(
                     ui.hits.iter().any(|hit| hit.action == action),
@@ -652,6 +758,7 @@ mod tests {
                 Action::ExplorerToken(true),
                 Action::MintMore,
                 Action::Refresh,
+                Action::NameAsset,
             ] {
                 assert!(
                     ui.hits.iter().any(|hit| hit.action == action),

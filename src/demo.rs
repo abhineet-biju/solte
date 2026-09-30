@@ -95,6 +95,7 @@ pub fn populate(app: &mut App) {
             },
             info: account.mint_info.clone(),
             error: None,
+            label: None,
         })
         .collect();
     app.project_mints

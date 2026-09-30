@@ -24,9 +24,16 @@ pub struct ProjectMint {
     pub record: MintRecord,
     pub info: Option<Value>,
     pub error: Option<String>,
+    pub label: Option<String>,
 }
 
 impl ProjectMint {
+    pub fn display_name(&self) -> String {
+        self.label
+            .as_deref()
+            .map(crate::model::clean_text)
+            .unwrap_or_else(|| crate::model::short(&self.record.address))
+    }
     pub fn can_mint(&self, wallets: &[Wallet]) -> bool {
         self.info
             .as_ref()
@@ -40,7 +47,11 @@ impl ProjectMint {
         } else {
             "SPL Token"
         };
-        let mut lines = vec![format!("{program} mint"), String::new(), "SUPPLY".into()];
+        let mut lines = vec![
+            format!("{} · {program} mint", self.display_name()),
+            String::new(),
+            "SUPPLY".into(),
+        ];
         if let Some(info) = &self.info {
             let supply = info["supply"].as_str().and_then(|v| v.parse::<u64>().ok());
             lines.extend([
@@ -143,11 +154,13 @@ pub async fn fetch(
                 record,
                 info: Some(info),
                 error: None,
+                label: None,
             },
             Err(error) => ProjectMint {
                 record,
                 info: None,
                 error: Some(network::safe_error(error, profile)),
+                label: None,
             },
         });
     }

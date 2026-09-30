@@ -124,6 +124,8 @@ pub enum FormKind {
     LogSearch,
     TokenSearch,
     TokenExport,
+    MintName,
+    TokenNames,
     TokenCreate,
     TokenTransfer,
     MintCreate,
@@ -152,6 +154,7 @@ pub enum Action {
     CopyToken(bool),
     ExplorerToken(bool),
     ExportToken,
+    NameAsset,
     CreateTokenAccount,
     TokenCreation,
     CreateMint,
@@ -347,6 +350,11 @@ impl Form {
                 vec![Field::new("Mint, account, program, state or delegate", "")]
             }
             FormKind::TokenExport => vec![Field::new("JSON export path", "token-account.json")],
+            FormKind::MintName => vec![Field::new("Mint name · optional", "")],
+            FormKind::TokenNames => vec![
+                Field::new("Mint name · optional", ""),
+                Field::new("Account name · optional", ""),
+            ],
             FormKind::LogSearch => vec![Field::new("Message or level", "")],
             FormKind::Search => vec![Field::new("Signature, instruction, or error", "")],
         };
@@ -375,6 +383,8 @@ impl Form {
             FormKind::LogSearch => "Filter logs",
             FormKind::TokenSearch => "Filter token accounts",
             FormKind::TokenExport => "Export token account",
+            FormKind::MintName => "Name mint locally",
+            FormKind::TokenNames => "Name mint & account locally",
             FormKind::TokenCreate => "Create associated token account",
             FormKind::TokenTransfer => "Send tokens",
             FormKind::MintCreate => "Create token mint",
@@ -391,6 +401,7 @@ impl Form {
             FormKind::Transfer | FormKind::TransactionImport => "Simulate & review",
             FormKind::Profile => "Save profile",
             FormKind::TokenExport => "Export JSON",
+            FormKind::MintName | FormKind::TokenNames => "Save names",
             FormKind::TokenCreate
             | FormKind::TokenTransfer
             | FormKind::MintCreate
@@ -578,6 +589,10 @@ pub struct App {
     pub tokens: Vec<crate::tokens::TokenAccount>,
     pub project_mints: Vec<crate::mints::ProjectMint>,
     pub mint_receipt: Option<crate::mints::MintRecord>,
+    pub asset_labels: crate::labels::Labels,
+    pub asset_labels_genesis: Option<String>,
+    pub asset_labels_revision: u64,
+    pub naming_target: Option<crate::labels::Target>,
     pub token_cursor: usize,
     pub token_export: Option<crate::tokens::TokenAccount>,
     pub token_operation: Option<crate::tokens::TokenAccount>,
@@ -642,6 +657,10 @@ impl App {
             tokens: vec![],
             project_mints: vec![],
             mint_receipt: None,
+            asset_labels: crate::labels::Labels::default(),
+            asset_labels_genesis: None,
+            asset_labels_revision: 0,
+            naming_target: None,
             token_export: None,
             token_operation: None,
             token_cursor: 0,
@@ -763,10 +782,11 @@ impl App {
             .filter(|a| {
                 query.is_empty()
                     || format!(
-                        "{} {} {} {} {} {} {}",
+                        "{} {} {} {} {} {} {} {}",
                         a.address,
                         a.mint,
                         a.label(),
+                        a.account_label.as_deref().unwrap_or(""),
                         a.program_label(),
                         a.state,
                         a.info()["delegate"],
@@ -983,6 +1003,9 @@ impl App {
                 }
                 KeyCode::Char('m') if matches!(modal, Modal::Token { .. } | Modal::Mint { .. }) => {
                     Some(Action::MintMore)
+                }
+                KeyCode::Char('L') if matches!(modal, Modal::Token { .. } | Modal::Mint { .. }) => {
+                    Some(Action::NameAsset)
                 }
                 KeyCode::Char('y' | 'M') if matches!(modal, Modal::Mint { .. }) => {
                     Some(Action::CopyToken(true))
@@ -1284,6 +1307,7 @@ impl App {
                     self.busy = None;
                 }
                 self.confidential_balances = None;
+                self.naming_target = None;
                 self.modal = None;
             }
             _ => return false,

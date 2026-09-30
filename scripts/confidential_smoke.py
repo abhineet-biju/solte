@@ -49,7 +49,18 @@ def main():
                 terminal.wait_for(lambda: 'Waiting for transaction confirmation' not in terminal.text and 'Signing and submitting' not in terminal.text, 'completed operation', timeout=10)
             sign()
             terminal.wait_text('Confidential balances enabled')
+            terminal.wait_text('View ATA [t]')
+            assert 'Create ATA [a]' not in terminal.text
             terminal.send(b't', 'Token account inspector')
+            terminal.send(b'y')
+            token_account = terminal.clipboard()
+            terminal.send(b'M')
+            mint = terminal.clipboard()
+            before = confirmed()
+            terminal.click_text('Name [L]', 'Name mint & account locally')
+            terminal.send(b'CT dev USD\tAlice CT balance\r', 'Token account inspector')
+            terminal.wait_text('CT dev USD')
+            assert confirmed() == before, 'Local naming must not submit a transaction'
             terminal.send(b'c', 'Confidential balances')
             terminal.resize(60, 10)
             terminal.resize(120, 36)
@@ -88,7 +99,23 @@ def main():
             terminal.escape('Confidential balances')
             terminal.send(b'q')
             terminal.wait_for(lambda: terminal.process.poll() == 0, 'clean exit')
-            print('Confidential terminal workflow passed: creation, setup, deposit, reveal/hide, apply, withdrawal, mouse/keyboard and resize')
+        with TerminalSession(command, 120, 36, artifact_dir=args.artifact_dir) as terminal:
+            terminal.wait_text('CT dev USD')
+            terminal.wait_text('Alice CT balance')
+            terminal.click_text('CT dev USD', 'Token account inspector', max_column=55)
+            terminal.send(b'y')
+            assert terminal.clipboard() == token_account
+            terminal.send(b'M')
+            assert terminal.clipboard() == mint
+            terminal.send(b'L', 'Name mint & account locally')
+            terminal.wait_text('Alice CT balance')
+            terminal.send(b'\x15\t\x15\r', 'Token account inspector')
+            with sqlite3.connect(root / '.solte/history.sqlite') as db:
+                assert db.execute('SELECT COUNT(*) FROM asset_labels').fetchone()[0] == 0
+            terminal.escape('Token account inspector')
+            terminal.send(b'q')
+            terminal.wait_for(lambda: terminal.process.poll() == 0, 'clean exit after reopening')
+        print('Confidential terminal workflow passed: mint/configure/deposit/reveal/hide/apply/withdraw, ATA actions, persistent local names, mouse/keyboard and resize')
 
 
 if __name__ == '__main__':
