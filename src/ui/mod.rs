@@ -210,6 +210,14 @@ impl Ui {
         area: Rect,
         theme: Theme,
     ) {
+        if field.choices.len() == 1 {
+            frame.render_widget(
+                Paragraph::new(format!(" {}", field.value)).style(theme.input(active)),
+                area,
+            );
+            self.target(area, Action::Field(index));
+            return;
+        }
         let value_area = Rect::new(area.x, area.y, area.width.saturating_sub(12), 1);
         frame.render_widget(
             Paragraph::new(format!(" {}", field.value)).style(theme.input(active)),
