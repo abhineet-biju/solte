@@ -98,11 +98,16 @@ def main():
             assert b"Associated token account" in output, "Create chooser should expose both operations"
             send(b"\r")
             assert b"Create token mint" in output
+            resize(88, 22)
+            assert b"more below" in output, "The mint form should advertise hidden fields"
+            send(b"\x1b[<65;40;12M")
+            assert process.poll() is None, "Mouse wheel should reveal later fields"
             for width, height in [(60, 10), (80, 20), (120, 32)]:
                 resize(width, height)
                 for _ in range(6):
                     send(b"\t")
                 assert process.poll() is None
+            resize(120, 32)
             send(b"\x1b")
             send(b"c")
             send(b"j\r")

@@ -402,10 +402,10 @@ impl Ui {
         let field = &form.fields[form.active];
         frame.render_widget(
             Paragraph::new(format!(
-                "{}  ({}/{})",
-                field.label,
+                "{}/{} · {}",
                 form.active + 1,
-                form.fields.len()
+                form.fields.len(),
+                field.label
             ))
             .style(Style::default().fg(theme.muted)),
             Rect::new(inner.x, inner.y, inner.width, 1),
@@ -437,35 +437,29 @@ impl Ui {
             self.target(field_area, Action::Field(form.active));
         }
         if form.fields.len() > 1 {
-            self.button(
+            self.form_navigation(
                 frame,
-                Rect::new(inner.x, inner.y + 2, 12, 1),
-                "Previous",
-                Action::Field(form.active.saturating_sub(1)),
+                form,
+                Rect::new(inner.x, inner.y + 2, inner.width, 1),
                 theme,
-                false,
-            );
-            self.button(
-                frame,
-                Rect::new(inner.right() - 10, inner.y + 2, 10, 1),
-                "Next",
-                Action::Field((form.active + 1).min(form.fields.len() - 1)),
-                theme,
-                false,
             );
         }
-        let note = form
-            .error
-            .as_deref()
-            .unwrap_or("[Tab] next field · [Enter] submit · [Esc] cancel");
-        frame.render_widget(
-            Paragraph::new(note).style(Style::default().fg(if form.error.is_some() {
-                theme.red
-            } else {
-                theme.muted
-            })),
-            Rect::new(inner.x, inner.y + 3, inner.width, 1),
-        );
+        if form.error.is_none() {
+            self.form_progress(
+                frame,
+                form,
+                form.active,
+                1,
+                Rect::new(inner.x, inner.y + 3, inner.width, 1),
+                theme,
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(form.error.as_deref().unwrap_or_default())
+                    .style(Style::default().fg(theme.red)),
+                Rect::new(inner.x, inner.y + 3, inner.width, 1),
+            );
+        }
         self.button(
             frame,
             Rect::new(

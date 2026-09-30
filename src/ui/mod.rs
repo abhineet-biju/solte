@@ -1,3 +1,4 @@
+mod forms;
 mod layout;
 mod navigation;
 mod short;
@@ -1534,6 +1535,14 @@ impl Ui {
             Modal::Form(form) => {
                 let capacity = (inner.height.saturating_sub(8) / 3).max(1) as usize;
                 let offset = form.active.saturating_sub(capacity - 1);
+                self.form_progress(
+                    frame,
+                    form,
+                    offset,
+                    capacity,
+                    Rect::new(inner.x, inner.y, inner.width, 1),
+                    theme,
+                );
                 for (row, (index, field)) in form
                     .fields
                     .iter()
@@ -1582,23 +1591,12 @@ impl Ui {
                     );
                     self.target(field_area, Action::Field(index));
                 }
-                if capacity < form.fields.len() {
-                    let y = inner.bottom().saturating_sub(6);
-                    self.button(
+                if form.fields.len() > 1 {
+                    self.form_navigation(
                         frame,
-                        Rect::new(inner.x, y, 10, 1),
-                        "Previous",
-                        Action::Field(form.active.saturating_sub(1)),
+                        form,
+                        Rect::new(inner.x, inner.bottom().saturating_sub(6), inner.width, 1),
                         theme,
-                        false,
-                    );
-                    self.button(
-                        frame,
-                        Rect::new(inner.right() - 10, y, 10, 1),
-                        "Next",
-                        Action::Field((form.active + 1).min(form.fields.len() - 1)),
-                        theme,
-                        false,
                     );
                 }
                 let note = form.error.as_deref().unwrap_or(match form.kind {
@@ -1954,6 +1952,8 @@ impl Ui {
                     "DIALOGS AND FORMS",
                     "Type normally in fields; [←]/[→] moves the cursor.",
                     "[Tab]/[Shift-Tab] changes fields or menu choices.",
+                    "Forms show field counts and more above/below hints.",
+                    "[↑]/[↓], wheel, or Previous/Next moves between fields.",
                     "[j]/[k] or [↑]/[↓] selects menu choices.",
                     "[Enter] applies a choice or submits a form.",
                     "[Esc] cancels without changing the page.",

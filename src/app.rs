@@ -398,10 +398,16 @@ impl Form {
         match key.code {
             KeyCode::Esc => return Some(Action::Close),
             KeyCode::Enter => return Some(Action::Submit),
-            KeyCode::Tab | KeyCode::Down => self.active = (self.active + 1) % self.fields.len(),
-            KeyCode::BackTab | KeyCode::Up => {
-                self.active = (self.active + self.fields.len() - 1) % self.fields.len()
+            KeyCode::Tab => return Some(Action::Field((self.active + 1) % self.fields.len())),
+            KeyCode::BackTab => {
+                return Some(Action::Field(
+                    (self.active + self.fields.len() - 1) % self.fields.len(),
+                ));
             }
+            KeyCode::Down => {
+                return Some(Action::Field((self.active + 1).min(self.fields.len() - 1)));
+            }
+            KeyCode::Up => return Some(Action::Field(self.active.saturating_sub(1))),
             KeyCode::Left => self.fields[self.active].left(),
             KeyCode::Right => self.fields[self.active].right(),
             KeyCode::Home => self.fields[self.active].cursor = 0,
@@ -1111,6 +1117,7 @@ impl App {
             Action::Field(index) => {
                 if let Some(Modal::Form(form)) = &mut self.modal {
                     form.active = index.min(form.fields.len() - 1);
+                    form.error = None;
                 }
             }
             Action::SelectTransaction(index) => {
