@@ -1270,7 +1270,9 @@ impl Ui {
                 .height
                 .saturating_sub(if screen.height < 24 { 2 } else { 6 }),
         };
-        let width = if matches!(modal, Modal::Inspect { .. } | Modal::Review { .. }) {
+        let width = if matches!(modal, Modal::Inspect { .. } | Modal::Review { .. })
+            || matches!(modal, Modal::Form(form) if matches!(form.kind, crate::app::FormKind::MintCreate | crate::app::FormKind::ConfidentialMint))
+        {
             104
         } else {
             72
@@ -1401,14 +1403,43 @@ impl Ui {
                     inner.width,
                     inner.height.saturating_sub(2),
                 );
-                self.inspection_body(frame, body, mint.lines(), *scroll, theme);
-                let mut actions = vec![("Create ATA [a]", Action::CreateTokenAccount)];
-                if app
-                    .tokens
-                    .iter()
-                    .any(|account| account.mint == mint.record.address)
-                {
-                    actions.insert(0, ("View account [t]", Action::ViewMintAccount));
+                let mut lines = mint.lines();
+                lines.extend([String::new(), "ACTIVE WALLET ACCOUNT".into()]);
+                if let Some(account) = app.mint_account(&mint.record.address) {
+                    lines.push(format!(
+                        "{}  {}",
+                        if account.associated {
+                            "ATA exists"
+                        } else {
+                            "Custom account"
+                        },
+                        account.address
+                    ));
+                } else {
+                    lines.push(
+                        if app.mint_accounts_known() {
+                            "No associated account for this wallet"
+                        } else {
+                            "Checking account availability · refresh if needed"
+                        }
+                        .into(),
+                    );
+                }
+                self.inspection_body(frame, body, lines, *scroll, theme);
+                let mut actions = Vec::new();
+                let account = app.mint_account(&mint.record.address);
+                if let Some(account) = account {
+                    actions.push((
+                        if account.associated {
+                            "View ATA [t]"
+                        } else {
+                            "View account [t]"
+                        },
+                        Action::ViewMintAccount,
+                    ));
+                }
+                if app.mint_accounts_known() && account.is_none_or(|account| !account.associated) {
+                    actions.push(("Create ATA [a]", Action::CreateTokenAccount));
                 }
                 if mint.can_mint(&app.wallets) {
                     actions.insert(0, ("Mint more [m]", Action::MintMore));
@@ -1561,7 +1592,34 @@ impl Ui {
             }
             Modal::Form(form) if screen.height < 20 => self.short_form(frame, form, inner, theme),
             Modal::Form(form) => {
-                let capacity = (inner.height.saturating_sub(8) / 3).max(1) as usize;
+                let grid = inner.width >= 88
+                    && matches!(
+                        form.kind,
+                        crate::app::FormKind::MintCreate | crate::app::FormKind::ConfidentialMint
+                    );
+                let rows = if grid {
+                    ((inner.height.saturating_sub(9) / 3).max(1) as usize)
+                        .min(form.fields.len().div_ceil(2))
+                } else {
+                    (inner.height.saturating_sub(8) / 3).max(1) as usize
+                };
+                let capacity = rows * if grid { 2 } else { 1 };
+                let field_width = if grid {
+                    (inner.width - 4) / 2
+                } else {
+                    inner.width
+                };
+                if grid {
+                    for (label, x) in [
+                        ("TOKEN SETUP", inner.x),
+                        ("SUPPLY & PERMISSIONS", inner.x + field_width + 4),
+                    ] {
+                        frame.render_widget(
+                            Paragraph::new(label).style(Style::default().fg(theme.heading).bold()),
+                            Rect::new(x, inner.y + 1, field_width, 1),
+                        );
+                    }
+                }
                 let offset = form.active.saturating_sub(capacity - 1);
                 self.form_progress(
                     frame,
@@ -1579,13 +1637,16 @@ impl Ui {
                     .take(capacity)
                     .enumerate()
                 {
-                    let y = inner.y + row as u16 * 3 + 1;
+                    let column = if grid { row / rows } else { 0 };
+                    let row = if grid { row % rows } else { row };
+                    let x = inner.x + column as u16 * (field_width + 4);
+                    let y = inner.y + row as u16 * 3 + if grid { 2 } else { 1 };
                     if y + 1 >= inner.bottom() {
                         break;
                     }
                     frame.render_widget(
                         Paragraph::new(field.label).style(Style::default().fg(theme.muted)),
-                        Rect::new(inner.x, y, inner.width, 1),
+                        Rect::new(x, y, field_width, 1),
                     );
                     let active = index == form.active;
                     if !field.choices.is_empty() {
@@ -1594,7 +1655,7 @@ impl Ui {
                             field,
                             index,
                             active,
-                            Rect::new(inner.x, y + 1, inner.width, 1),
+                            Rect::new(x, y + 1, field_width, 1),
                             theme,
                         );
                         continue;
@@ -1602,7 +1663,7 @@ impl Ui {
                     let visible: String = field.value[..field.cursor]
                         .chars()
                         .rev()
-                        .take(inner.width.saturating_sub(3) as usize)
+                        .take(field_width.saturating_sub(3) as usize)
                         .collect::<Vec<_>>()
                         .into_iter()
                         .rev()
@@ -1612,7 +1673,7 @@ impl Ui {
                         if active { "▏" } else { "" },
                         &field.value[field.cursor..]
                     );
-                    let field_area = Rect::new(inner.x, y + 1, inner.width, 1);
+                    let field_area = Rect::new(x, y + 1, field_width, 1);
                     frame.render_widget(
                         Paragraph::new(value).style(theme.input(active)),
                         field_area,
@@ -1645,8 +1706,19 @@ impl Ui {
                         "Profiles are stored locally in .solte/config.toml."
                     }
                     crate::app::FormKind::Confidential(_) => "Amounts and confidential balances are private; account addresses stay public. Send and withdraw use v1 with inline proofs.",
-                    crate::app::FormKind::ConfidentialMint => "Token-2022. Initial tokens are public; configure and deposit them to use confidential balances. Auditor key is optional.",
-                    crate::app::FormKind::MintCreate => "No extensions. Blank freeze authority disables freezing. Initial supply goes to the active wallet; its authority must be loaded.",
+                    crate::app::FormKind::ConfidentialMint => match form.active {
+                        6 => "Automatic approval enables configured accounts immediately; Manual needs authority approval.",
+                        7 => "Optional ElGamal public key that can decrypt transfer amounts.",
+                        _ => "Initial tokens are public. Configure the account, then deposit and apply for confidential use.",
+                    },
+                    crate::app::FormKind::MintCreate => match form.active {
+                        0 => "Choose the token program for this mint.",
+                        1 => "Decimal places used to display token amounts.",
+                        2 => "This authority signs token issuance. Load its wallet for an initial supply.",
+                        3 => "Leave blank to disable freezing.",
+                        4 => "Initial tokens go to the active wallet's associated account.",
+                        _ => "Auto uses Legacy. Explicit formats require support from the RPC.",
+                    },
                     crate::app::FormKind::MintMore => "Requires a loaded mint authority. Amount uses mint decimals. Recipient's associated account is created if missing.",
                     crate::app::FormKind::TokenCreate => "Creates the recipient wallet’s associated account for this mint. Payer covers rent.",
                     crate::app::FormKind::TokenTransfer => "Amount uses mint decimals. Wallet destinations create an ATA if missing; explicit token accounts must already exist.",
@@ -2015,6 +2087,36 @@ impl Ui {
         }
     }
 
+    pub(super) fn detail_lines(lines: Vec<String>, theme: Theme) -> Vec<Line<'static>> {
+        lines
+            .into_iter()
+            .flat_map(|line| line.split('\n').map(str::to_owned).collect::<Vec<_>>())
+            .map(|line| {
+                if line.contains("failed") || line.starts_with("Error") || line.contains("FAILED") {
+                    Line::styled(line, Style::default().fg(theme.red))
+                } else if !line.is_empty()
+                    && line.len() <= 40
+                    && line.chars().any(|c| c.is_ascii_alphabetic())
+                    && line.chars().all(|c| !c.is_lowercase())
+                {
+                    Line::styled(line, Style::default().fg(theme.heading).bold())
+                } else if let Some((label, value)) = line.split_once("  ") {
+                    let color = if label.contains("balance") || label == "Supply" {
+                        theme.green
+                    } else {
+                        theme.text
+                    };
+                    Line::from(vec![
+                        Span::styled(format!("{label}  "), Style::default().fg(theme.muted)),
+                        Span::styled(value.to_owned(), Style::default().fg(color)),
+                    ])
+                } else {
+                    Line::styled(line, Style::default().fg(theme.text))
+                }
+            })
+            .collect()
+    }
+
     fn inspection_body(
         &mut self,
         frame: &mut Frame,
@@ -2023,22 +2125,7 @@ impl Ui {
         scroll: u16,
         theme: Theme,
     ) {
-        let lines: Vec<_> = lines
-            .into_iter()
-            .map(|line| {
-                let color = if line.contains("failed")
-                    || line.starts_with("Error")
-                    || line.contains("FAILED")
-                {
-                    theme.red
-                } else if line.chars().all(|c| !c.is_lowercase()) && !line.is_empty() {
-                    theme.accent
-                } else {
-                    theme.text
-                };
-                Line::from(Span::styled(line, Style::default().fg(color)))
-            })
-            .collect();
+        let lines = Self::detail_lines(lines, theme);
         let gap = u16::from(area.height >= 10);
         let content = Rect::new(
             area.x,

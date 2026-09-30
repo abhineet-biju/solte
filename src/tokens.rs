@@ -113,58 +113,70 @@ impl TokenAccount {
         let info = self.info();
         let mut lines = vec![
             format!("{} · {}", self.label(), self.program_label()),
-            format!("Base balance {}", format_amount(self.amount, self.decimals)),
-            format!("Raw amount   {}", self.amount),
-            format!("Decimals     {}", self.decimals),
-            format!("State        {}", self.state),
+            String::new(),
+            "BALANCE".into(),
             format!(
-                "Account type {}",
+                "Public balance  {}",
+                format_amount(self.amount, self.decimals)
+            ),
+            format!("Raw amount      {}", self.amount),
+            format!("Decimals        {}", self.decimals),
+            String::new(),
+            "ACCOUNT".into(),
+            format!(
+                "Type       {}",
                 if self.associated {
                     "Associated (ATA)"
                 } else {
                     "Custom"
                 }
             ),
+            format!("State      {}", self.state),
             format!(
-                "Wrapped SOL  {}",
-                info["isNative"].as_bool().unwrap_or(false)
-            ),
-            format!(
-                "Lamports     {} · {} SOL",
+                "Lamports   {} · {} SOL",
                 self.lamports,
                 crate::amount::format_sol(self.lamports)
             ),
             format!(
-                "Account size {}",
+                "Size       {}",
                 self.account["space"]
                     .as_u64()
                     .map(|size| format!("{size} bytes"))
                     .unwrap_or_else(|| "Unavailable".into())
             ),
-            format!("Read at slot {}", self.slot),
+            format!("Read slot  {}", self.slot),
             String::new(),
-            "TOKEN ACCOUNT".into(),
+            "ADDRESSES".into(),
+            "Token account".into(),
             self.address.clone(),
-            "MINT".into(),
+            String::new(),
+            "Mint".into(),
             self.mint.clone(),
-            "WALLET AUTHORITY".into(),
+            String::new(),
+            "Wallet authority".into(),
             self.authority.clone(),
-            "OWNING PROGRAM".into(),
+            String::new(),
+            "Owning program".into(),
             self.program.clone(),
             String::new(),
+            "PERMISSIONS".into(),
             format!(
-                "Delegate     {}",
+                "Delegate         {}",
                 info["delegate"].as_str().unwrap_or("None")
             ),
             format!(
-                "Delegated raw {}",
+                "Delegated raw    {}",
                 info["delegatedAmount"]["amount"].as_str().unwrap_or("0")
             ),
             format!(
-                "Close authority {}",
+                "Close authority  {}",
                 info["closeAuthority"]
                     .as_str()
                     .unwrap_or("Wallet authority")
+            ),
+            format!(
+                "Wrapped SOL      {}",
+                info["isNative"].as_bool().unwrap_or(false)
             ),
             String::new(),
             "MINT DETAILS".into(),

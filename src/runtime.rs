@@ -632,9 +632,7 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
                 bail!("Select a project mint first");
             };
             let account = app
-                .tokens
-                .iter()
-                .find(|account| account.mint == mint.record.address)
+                .mint_account(&mint.record.address)
                 .context(
                     "No token account for this mint in the active wallet; create an ATA or refresh",
                 )?
@@ -716,6 +714,19 @@ async fn handle(app: &mut App, services: &mut Services, mut action: Action) -> R
             app.open_form(FormKind::TokenTransfer);
         }
         Action::CreateTokenAccount => {
+            if let Some(Modal::Mint { mint, .. }) = &app.modal {
+                if app
+                    .mint_account(&mint.record.address)
+                    .is_some_and(|account| account.associated)
+                {
+                    app.status = "This wallet already has an ATA. Use View ATA [t]; create an account for another wallet from Tokens → Create.".into();
+                    return Ok(false);
+                }
+                anyhow::ensure!(
+                    app.mint_accounts_known(),
+                    "Refresh token accounts to check ATA availability first"
+                );
+            }
             anyhow::ensure!(
                 !app.wallet()
                     .context("Select a signing wallet first")?

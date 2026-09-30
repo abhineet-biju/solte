@@ -1,7 +1,8 @@
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::Style,
+    text::{Line, Span},
     widgets::{Block, BorderType, Paragraph, Wrap},
 };
 
@@ -170,9 +171,9 @@ impl Ui {
         };
         let body_y = inner.y + if roomy { 3 } else { 1 };
         let body_bottom = inner.bottom() - reserved;
-        let split = inner.width >= 104 && roomy;
+        let split = inner.width >= 136 && roomy;
         let list_width = if split {
-            inner.width * 55 / 100
+            (inner.width * 60 / 100).max(76)
         } else {
             inner.width
         };
@@ -193,10 +194,50 @@ impl Ui {
                 Rect::new(inner.x, inner.y + 1, inner.width, 1),
             );
         }
-        let detailed = list.width >= 76;
-        let row_height = if detailed { 2 } else { 1 };
-        let count = usize::from(list.height / row_height);
+        let detailed = list.width >= 72;
+        let header = u16::from(list.height >= 7);
+        let row_height = if list.height >= 9 {
+            3
+        } else if list.height >= 5 {
+            2
+        } else {
+            1
+        };
+        let count = usize::from(list.height.saturating_sub(header) / row_height);
         let start = app.token_cursor.saturating_sub(count.saturating_sub(1));
+        let balance_width = if detailed { 20 } else { 17 };
+        let program_width = if detailed { 13 } else { 0 };
+        let state_width = if detailed { 12 } else { 10 };
+        let name_width = list.width.saturating_sub(
+            balance_width + program_width + state_width + if detailed { 6 } else { 4 },
+        );
+        let balance_x = list.x + name_width + 2;
+        let program_x = balance_x + balance_width + 2;
+        let state_x = if detailed {
+            program_x + program_width + 2
+        } else {
+            program_x
+        };
+        if header > 0 {
+            for (label, x, width, alignment) in [
+                ("Token / mint", list.x, name_width, Alignment::Left),
+                ("Public balance", balance_x, balance_width, Alignment::Right),
+                ("State", state_x, state_width, Alignment::Left),
+            ] {
+                frame.render_widget(
+                    Paragraph::new(label)
+                        .alignment(alignment)
+                        .style(Style::default().fg(theme.muted)),
+                    Rect::new(x, list.y, width, 1),
+                );
+            }
+            if detailed {
+                frame.render_widget(
+                    Paragraph::new("Program").style(Style::default().fg(theme.muted)),
+                    Rect::new(program_x, list.y, program_width, 1),
+                );
+            }
+        }
         if accounts.is_empty() {
             let empty = if app.wallet().is_none() {
                 "Create or select a wallet to inspect its token accounts."
@@ -225,67 +266,117 @@ impl Ui {
             .take(count)
             .enumerate()
         {
-            let y = list.y + row as u16 * row_height;
-            let balance = format!(
-                "{}{}",
-                format_amount(account.amount, account.decimals),
-                if crate::confidential::enabled(account) {
-                    " public · CT"
-                } else {
-                    ""
-                }
-            );
-            let flags = format!(
-                "{}{}",
-                if account.associated { "ATA" } else { "Custom" },
-                if account.info().get("delegate").is_some() {
-                    " · delegated"
-                } else {
-                    ""
-                }
-            );
-            let color = if account.state == "frozen" {
-                theme.red
-            } else if account.amount > 0 {
-                theme.green
+            let y = list.y + header + row as u16 * row_height;
+            let background = if index == app.token_cursor {
+                theme.selected
             } else {
-                theme.muted
+                theme.panel
             };
-            let text = if detailed {
-                format!(
-                    "{}  {}  {} · {}\nAccount {}  Mint {}  {}",
-                    account.label(),
-                    balance,
-                    account.program_label(),
-                    account.state,
-                    short(&account.address),
-                    short(&account.mint),
-                    flags
-                )
-            } else {
-                format!(
-                    "{}  {}  {}  {}",
-                    short(&account.mint),
-                    balance,
-                    if account.program == crate::tokens::TOKEN_2022 {
-                        "T22"
-                    } else {
-                        "SPL"
-                    },
-                    account.state
-                )
-            };
-            let rect = Rect::new(list.x, y, list.width, row_height);
+            let rect = Rect::new(list.x, y, list.width, row_height.min(2));
             frame.render_widget(
-                Paragraph::new(text).style(Style::default().fg(color).bg(
-                    if index == app.token_cursor {
-                        theme.selected
-                    } else {
-                        theme.panel
-                    },
-                )),
+                Paragraph::new("").style(Style::default().bg(background)),
                 rect,
             );
+            let label = account.label();
+            let title = if crate::confidential::enabled(account) {
+                format!("CT · {label}")
+            } else {
+                label.clone()
+            };
+            frame.render_widget(
+                Paragraph::new(title).style(Style::default().fg(theme.text).bg(background)),
+                Rect::new(list.x, y, name_width, 1),
+            );
+            let amount = format_amount(account.amount, account.decimals);
+            let amount = if amount.chars().count() > balance_width as usize {
+                format!(
+                    "{}…",
+                    amount
+                        .chars()
+                        .take(balance_width.saturating_sub(1) as usize)
+                        .collect::<String>()
+                )
+            } else {
+                amount
+            };
+            frame.render_widget(
+                Paragraph::new(amount).alignment(Alignment::Right).style(
+                    Style::default()
+                        .fg(if account.state == "frozen" {
+                            theme.red
+                        } else if account.amount > 0 {
+                            theme.green
+                        } else {
+                            theme.muted
+                        })
+                        .bg(background),
+                ),
+                Rect::new(balance_x, y, balance_width, 1),
+            );
+            if detailed {
+                frame.render_widget(
+                    Paragraph::new(account.program_label())
+                        .style(Style::default().fg(theme.muted).bg(background)),
+                    Rect::new(program_x, y, program_width, 1),
+                );
+            }
+            frame.render_widget(
+                Paragraph::new(if account.state == "initialized" {
+                    "Active"
+                } else {
+                    &account.state
+                })
+                .style(
+                    Style::default()
+                        .fg(if account.state == "frozen" {
+                            theme.red
+                        } else {
+                            theme.muted
+                        })
+                        .bg(background),
+                ),
+                Rect::new(state_x, y, state_width, 1),
+            );
+            if row_height > 1 {
+                let kind = if account.associated {
+                    "ATA"
+                } else {
+                    "Custom account"
+                };
+                let mut spans = vec![Span::styled(
+                    format!("{kind} {}", short(&account.address)),
+                    Style::default().fg(theme.muted),
+                )];
+                if label != short(&account.mint) {
+                    spans.push(Span::styled(
+                        format!("   Mint {}", short(&account.mint)),
+                        Style::default().fg(theme.muted),
+                    ));
+                }
+                if !detailed {
+                    spans.push(Span::styled(
+                        format!(
+                            "   {}",
+                            if account.program == crate::tokens::TOKEN_2022 {
+                                "Token-2022"
+                            } else {
+                                "SPL"
+                            }
+                        ),
+                        Style::default().fg(theme.muted),
+                    ));
+                }
+                if account.info().get("delegate").is_some() {
+                    spans.push(Span::styled(
+                        "   Delegated",
+                        Style::default().fg(theme.accent),
+                    ));
+                }
+                frame.render_widget(
+                    Paragraph::new(Line::from(spans)).style(Style::default().bg(background)),
+                    Rect::new(list.x, y + 1, list.width, 1),
+                );
+            }
             self.target(rect, Action::SelectToken(index));
         }
         if split {
@@ -303,7 +394,7 @@ impl Ui {
             frame.render_widget(block, details);
             if let Some(account) = app.selected_token() {
                 frame.render_widget(
-                    Paragraph::new(account.lines().join("\n"))
+                    Paragraph::new(Self::detail_lines(account.lines(), theme))
                         .wrap(Wrap { trim: false })
                         .style(Style::default().fg(theme.text)),
                     content,
@@ -560,7 +651,6 @@ mod tests {
                 Action::ViewMintAccount,
                 Action::ExplorerToken(true),
                 Action::MintMore,
-                Action::CreateTokenAccount,
                 Action::Refresh,
             ] {
                 assert!(
@@ -569,10 +659,65 @@ mod tests {
                 );
             }
             assert!(
+                !ui.hits
+                    .iter()
+                    .any(|hit| hit.action == Action::CreateTokenAccount)
+            );
+            assert!(
                 ui.hits
                     .iter()
                     .all(|hit| hit.area.right() <= width && hit.area.bottom() <= height)
             );
         }
+    }
+
+    #[test]
+    fn mint_account_actions_follow_discovery_and_associated_account_state() {
+        use crate::app::Modal;
+        let mut app = App::new("/test".into(), Config::default(), vec![]);
+        demo::populate(&mut app);
+        let mint = app.project_mints[0].clone();
+        app.tokens
+            .retain(|account| account.mint != mint.record.address);
+        app.modal = Some(Modal::Mint {
+            mint: Box::new(mint.clone()),
+            scroll: 0,
+        });
+        let mut ui = Ui::default();
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        for known in [true, false] {
+            app.token_loading = !known;
+            terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+            assert_eq!(
+                ui.hits
+                    .iter()
+                    .any(|hit| hit.action == Action::CreateTokenAccount),
+                known
+            );
+            assert!(
+                !ui.hits
+                    .iter()
+                    .any(|hit| hit.action == Action::ViewMintAccount)
+            );
+        }
+        demo::populate(&mut app);
+        app.token_loading = false;
+        let account = app
+            .tokens
+            .iter_mut()
+            .find(|account| account.mint == mint.record.address)
+            .unwrap();
+        account.associated = false;
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        for action in [Action::ViewMintAccount, Action::CreateTokenAccount] {
+            assert!(ui.hits.iter().any(|hit| hit.action == action));
+        }
+        app.token_warnings.push("SPL discovery unavailable".into());
+        terminal.draw(|frame| ui.draw(frame, &app)).unwrap();
+        assert!(
+            !ui.hits
+                .iter()
+                .any(|hit| hit.action == Action::CreateTokenAccount)
+        );
     }
 }

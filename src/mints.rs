@@ -35,30 +35,56 @@ impl ProjectMint {
     }
 
     pub fn lines(&self) -> Vec<String> {
-        let mut lines = vec![
-            self.record.address.clone(),
-            format!("Program {}", self.record.program),
-            format!("Decimals {}", self.record.decimals),
-            format!("Created by {}", self.record.creator),
-        ];
+        let program = if self.record.program == tokens::TOKEN_2022 {
+            "Token-2022"
+        } else {
+            "SPL Token"
+        };
+        let mut lines = vec![format!("{program} mint"), String::new(), "SUPPLY".into()];
         if let Some(info) = &self.info {
-            for (label, key) in [
-                ("Supply · raw", "supply"),
-                ("Mint authority", "mintAuthority"),
-                ("Freeze authority", "freezeAuthority"),
-            ] {
-                lines.push(format!("{label}: {}", info[key].as_str().unwrap_or("None")));
-            }
+            let supply = info["supply"].as_str().and_then(|v| v.parse::<u64>().ok());
+            lines.extend([
+                format!(
+                    "Supply        {}",
+                    supply
+                        .map(|v| tokens::format_amount(v, self.record.decimals))
+                        .unwrap_or_else(|| "Unavailable".into())
+                ),
+                format!(
+                    "Raw supply    {}",
+                    info["supply"].as_str().unwrap_or("Unavailable")
+                ),
+                format!("Decimals      {}", self.record.decimals),
+                String::new(),
+                "AUTHORITIES".into(),
+                format!(
+                    "Mint authority    {}",
+                    info["mintAuthority"].as_str().unwrap_or("None")
+                ),
+                format!(
+                    "Freeze authority  {}",
+                    info["freezeAuthority"].as_str().unwrap_or("None")
+                ),
+            ]);
             if let Some(state) = crate::confidential::extension(info, "confidentialTransferMint") {
                 lines.extend([
+                    String::new(),
+                    "CONFIDENTIAL TRANSFERS".into(),
                     "Confidential balances enabled".into(),
-                    format!("Automatic approval {}", state["autoApproveNewAccounts"]),
                     format!(
-                        "Approval authority {}",
+                        "Account approval  {}",
+                        if state["autoApproveNewAccounts"] == true {
+                            "Automatic"
+                        } else {
+                            "Manual"
+                        }
+                    ),
+                    format!(
+                        "Approval authority  {}",
                         state["authority"].as_str().unwrap_or("None")
                     ),
                     format!(
-                        "Auditor {}",
+                        "Auditor             {}",
                         state["auditorElgamalPubkey"].as_str().unwrap_or("None")
                     ),
                 ]);
@@ -71,8 +97,20 @@ impl ProjectMint {
                     .unwrap_or("Refresh to inspect on-chain state")
             ));
         }
+        lines.extend([
+            String::new(),
+            "ADDRESSES".into(),
+            "Mint".into(),
+            self.record.address.clone(),
+            String::new(),
+            "Owning program".into(),
+            self.record.program.clone(),
+            String::new(),
+            "CREATION".into(),
+            format!("Created by  {}", self.record.creator),
+        ]);
         if !self.record.signature.is_empty() {
-            lines.push(format!("Creation signature {}", self.record.signature));
+            lines.extend(["Signature".into(), self.record.signature.clone()]);
         }
         lines
             .into_iter()

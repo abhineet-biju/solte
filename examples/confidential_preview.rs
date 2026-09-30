@@ -38,6 +38,23 @@ fn main() -> anyhow::Result<()> {
             width,
             height,
         )?;
+        app.modal = Some(Modal::Mint {
+            mint: Box::new(app.project_mints[0].clone()),
+            scroll: 0,
+        });
+        ui::snapshot(
+            &app,
+            &output.join(format!("solte-mint-inspector-{width}.svg")),
+            width,
+            height,
+        )?;
+        app.open_form(solte::app::FormKind::MintCreate);
+        ui::snapshot(
+            &app,
+            &output.join(format!("solte-mint-create-{width}.svg")),
+            width,
+            height,
+        )?;
         for selected in [0, 3, 5] {
             app.modal = Some(Modal::Confidential {
                 account: Box::new(app.tokens[2].clone()),

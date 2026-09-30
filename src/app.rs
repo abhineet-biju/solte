@@ -299,13 +299,10 @@ impl Form {
                 Field::new("WebSocket endpoint", "ws://127.0.0.1:8900"),
             ],
             FormKind::MintCreate | FormKind::ConfidentialMint => vec![
-                Field::choice(
-                    "Token program · [←]/[→] choose",
-                    &["SPL Token", "Token-2022"],
-                ),
+                Field::choice("Token program", &["SPL Token", "Token-2022"]),
                 Field::new("Decimals", "6"),
                 Field::new("Mint authority address", ""),
-                Field::new("Freeze authority · blank disables", ""),
+                Field::new("Freeze authority · optional", ""),
                 Field::new("Initial supply · tokens", "0"),
                 Field::choice("Format · [←]/[→] choose", &["Auto", "Legacy", "v0", "v1"]),
             ],
@@ -356,11 +353,8 @@ impl Form {
         let mut fields = fields;
         if kind == FormKind::ConfidentialMint {
             fields[0] = Field::choice("Token program", &["Token-2022"]);
-            fields.push(Field::choice(
-                "Confidential account approval",
-                &["Automatic", "Manual"],
-            ));
-            fields.push(Field::new("Auditor ElGamal public key · optional", ""));
+            fields.push(Field::choice("Account approval", &["Automatic", "Manual"]));
+            fields.push(Field::new("Auditor public key · optional", ""));
         }
         Self {
             kind,
@@ -786,6 +780,19 @@ impl App {
                     .contains(&query)
             })
             .collect()
+    }
+    pub fn mint_accounts_known(&self) -> bool {
+        !self.token_loading
+            && self.token_error.is_none()
+            && self.token_warnings.is_empty()
+            && self.token_updated.is_some()
+            && self.token_genesis.as_deref() == self.network.as_ref().map(|n| n.genesis.as_str())
+    }
+    pub fn mint_account(&self, mint: &str) -> Option<&crate::tokens::TokenAccount> {
+        self.tokens
+            .iter()
+            .find(|a| a.mint == mint && a.associated)
+            .or_else(|| self.tokens.iter().find(|a| a.mint == mint))
     }
     pub fn selected_token(&self) -> Option<&crate::tokens::TokenAccount> {
         self.visible_tokens().get(self.token_cursor).copied()
