@@ -150,7 +150,15 @@ impl Ui {
             .enumerate()
         {
             let y = list.y + row as u16 * row_height;
-            let balance = format_amount(account.amount, account.decimals);
+            let balance = format!(
+                "{}{}",
+                format_amount(account.amount, account.decimals),
+                if crate::confidential::enabled(account) {
+                    " · CT"
+                } else {
+                    ""
+                }
+            );
             let flags = format!(
                 "{}{}",
                 if account.associated { "ATA" } else { "Custom" },

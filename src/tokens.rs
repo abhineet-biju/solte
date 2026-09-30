@@ -181,6 +181,7 @@ impl TokenAccount {
         } else {
             lines.push("Mint details unavailable from this RPC".into());
         }
+        lines.extend(crate::confidential::lines(self));
         lines.extend(extensions("ACCOUNT EXTENSIONS", info));
         lines
             .into_iter()

@@ -721,13 +721,18 @@ impl App {
             .filter(|a| {
                 query.is_empty()
                     || format!(
-                        "{} {} {} {} {} {}",
+                        "{} {} {} {} {} {} {}",
                         a.address,
                         a.mint,
                         a.label(),
                         a.program_label(),
                         a.state,
-                        a.info()["delegate"]
+                        a.info()["delegate"],
+                        if crate::confidential::enabled(a) {
+                            "confidential"
+                        } else {
+                            ""
+                        }
                     )
                     .to_lowercase()
                     .contains(&query)
