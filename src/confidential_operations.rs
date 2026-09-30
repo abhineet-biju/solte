@@ -306,10 +306,7 @@ pub async fn prepare(
         let destination = snapshot(&rpc, destination, &selected.mint)
             .await
             .context("Recipient needs an existing configured confidential token account")?;
-        destination
-            .state
-            .context("Recipient is not configured")?
-            .valid_as_destination()?;
+        receive_ready(&destination.state.context("Recipient is not configured")?)?;
         guards.extend(destination.guards.clone());
         Some(destination)
     } else {
@@ -399,6 +396,23 @@ pub async fn prepare(
     Ok(prepared)
 }
 
+fn receive_ready(state: &ConfidentialTransferAccount) -> Result<()> {
+    ensure!(
+        bool::from(state.approved),
+        "Recipient account needs confidential approval"
+    );
+    ensure!(
+        bool::from(state.allow_confidential_credits),
+        "Account does not accept confidential credits"
+    );
+    ensure!(
+        u64::from(state.pending_balance_credit_counter)
+            < u64::from(state.maximum_pending_balance_credit_counter),
+        "Pending credit limit reached; the owner must apply pending balances before receiving more tokens"
+    );
+    Ok(())
+}
+
 fn build(
     source: &Snapshot,
     wallet: &Wallet,
@@ -464,14 +478,17 @@ fn build(
     }
     let state = source.state.context("Configure this account first")?;
     check_keys(&state, &keys)?;
-    state.valid_as_source()?;
+    ensure!(
+        bool::from(state.approved),
+        "This account needs confidential approval before it can be used"
+    );
     match request.operation {
         Operation::Deposit => {
             ensure!(
                 amount <= source.base.amount,
                 "Insufficient public token balance"
             );
-            state.valid_as_destination()?;
+            receive_ready(&state)?;
             Ok(vec![ct::deposit(
                 &program,
                 &source.address,
@@ -587,6 +604,40 @@ pub(crate) fn account_guard(owner: &Pubkey, data: &[u8]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recipient_eligibility_errors_explain_the_required_action() {
+        let mut state = ConfidentialTransferAccount {
+            approved: true.into(),
+            allow_confidential_credits: true.into(),
+            maximum_pending_balance_credit_counter: 10.into(),
+            ..Default::default()
+        };
+        assert!(receive_ready(&state).is_ok());
+        state.approved = false.into();
+        assert!(
+            receive_ready(&state)
+                .unwrap_err()
+                .to_string()
+                .contains("approval")
+        );
+        state.approved = true.into();
+        state.allow_confidential_credits = false.into();
+        assert!(
+            receive_ready(&state)
+                .unwrap_err()
+                .to_string()
+                .contains("confidential credits")
+        );
+        state.allow_confidential_credits = true.into();
+        state.pending_balance_credit_counter = 10.into();
+        assert!(
+            receive_ready(&state)
+                .unwrap_err()
+                .to_string()
+                .contains("apply pending")
+        );
+    }
+
     #[test]
     fn confidential_keys_are_reproducible_and_wrong_owners_cannot_decrypt() {
         let directory = tempfile::tempdir().unwrap();

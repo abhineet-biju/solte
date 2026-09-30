@@ -259,6 +259,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn confidential_history_identifies_the_operation_without_inferring_private_amounts() {
+        let record = TransactionRecord {
+            signature: "test".into(),
+            slot: 1,
+            timestamp: None,
+            error: None,
+            details: Some(
+                serde_json::json!({"transaction":{"message":{"accountKeys":["wallet"],"instructions":[{"parsed":{"type":"reallocate"}},{"parsed":{"type":"confidentialTransfer"}}]}},"meta":{"fee":5,"preBalances":[100],"postBalances":[80]}}),
+            ),
+        };
+        assert_eq!(record.kind(), "Confidential transfer");
+        assert_eq!(record.activity("wallet"), "Confidential transfer");
+    }
+
+    #[test]
     fn log_signatures_require_a_full_valid_signature() {
         let signature = solana_signature::Signature::from([7; 64]).to_string();
         assert_eq!(
