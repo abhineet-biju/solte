@@ -71,7 +71,7 @@ Use `j`/`k`, Page Up/Down, or the mouse to select accounts. Wide windows show a 
 - `[a]` prepares associated account creation for a mint and recipient wallet. It preserves an existing ATA and shows the rent estimate and paying wallet before signing.
 - `[s]` prepares a checked transfer from the selected account. Choose a recipient wallet to create its ATA if missing, or an explicit existing token account for the same mint and program. Enter the amount in token units, using no more than the mint's decimal places.
 
-All token operations simulate unsigned transactions and require explicit review before signing/submitting. Auto uses Legacy; Legacy, v0 and v1 can be selected explicitly. Invalid decimals, insufficient balances, frozen accounts and incompatible destinations are rejected. Mainnet signing remains disabled. Token-2022 extensions that change transfers, amounts or account permissions require additional implementation; those accounts remain inspectable, and unsupported transfers fail with the extension name. Burning, authority changes, metadata editing and Token-2022 extension configuration are not part of the current composer.
+All token operations simulate unsigned transactions and require explicit review before signing/submitting. Auto uses Legacy; Legacy, v0 and v1 can be selected explicitly. Invalid decimals, insufficient balances, frozen accounts and incompatible destinations are rejected. Mainnet signing remains disabled. Token-2022 extensions that change transfers, amounts or account permissions require additional implementation; those accounts remain inspectable, and unsupported transfers fail with the extension name. Burning, authority changes, metadata editing and general Token-2022 extension configuration are not part of the current composer; confidential setup is described below.
 
 Created mint addresses and creation signatures are stored as public records in `.solte/history.sqlite`, scoped to the RPC endpoint and genesis hash and shared across project wallets. Records are saved before broadcasting so uncertain submissions remain inspectable; a missing on-chain mint is labeled unavailable. The temporary mint signing key is never written to disk.
 
@@ -90,6 +90,41 @@ To test both token programs on an isolated local validator, use loopback endpoin
 ```sh
 SOLTE_TEST_RPC=http://127.0.0.1:8899 SOLTE_TEST_WS=ws://127.0.0.1:8900 \
   cargo test --locked --test token_localnet -- --ignored
+```
+
+## Confidential balances
+
+Tokens discovers Token-2022 confidential mints and accounts. A `CT` marker identifies them, and searching for `confidential` filters the list. The listed amount is the public balance. Inspectors show approval policy, auditor, incoming-credit settings and pending-credit counts. An encrypted amount is shown as locked, never assumed to be zero.
+
+Use **Create [c] → Confidential token mint** to create a test mint with automatic or manual account approval. The mint authority also controls confidential account approval. An optional auditor ElGamal public key receives encrypted transfer amounts. Initial supply is public; the new mint appears in Project mints even with zero supply.
+
+Open an owned token account's inspector, then **Confidential [c]**:
+
+1. **Configure account** allocates the confidential extension and establishes encryption keys. Solte reviews the additional rent and refuses to replace an existing account's keys. The pending-credit limit defaults to 65,536.
+2. **Approve account** is needed for a mint with manual approval. Enter a token account for the same mint. Solte uses the loaded confidential authority wallet; the active wallet pays fees. Automatic approval happens during configuration.
+3. **Deposit public tokens** moves a public amount into the pending confidential balance. **Apply pending balance** makes those credits available to spend.
+4. **Send confidentially** sends to an existing, configured and approved account. Enter a recipient wallet for its ATA, or choose an explicit token account. The recipient must apply its pending credits before spending them.
+5. **Withdraw to public** returns an available confidential amount to the public balance.
+
+**Reveal balances** derives the owner's keys locally and displays public, available and pending balances for the current snapshot. **Hide balances**, closing the dialog, switching wallet/network, or a successful token refresh clears the revealed values. Derivation signs the canonical `solana-conf-bal/v1` message locally; it submits no transaction. Secrets and derivation signatures are never saved. Older clients and custom setups may use different encryption keys; Solte reports a mismatch and preserves the account.
+
+Transaction actions use unsigned simulation, explicit review, then signing/submission. Account setup, approval, deposit and apply use Legacy; confidential sending and withdrawal use a single v1 transaction with inline proofs. They require a compatible validator and the ZK ElGamal Proof Program. Failed simulations cannot be submitted. Changes to the reviewed account, recipient or mint require a fresh review. Temporary proof accounts are not created.
+
+Confidentiality hides transfer amounts and confidential balances; addresses and counterparties remain public. Deposits and withdrawals reveal their amounts. Public transfers and minting remain available when account policy permits them. Default JSON exports contain public account state and ciphertexts, without revealed balances or decryption keys. History labels confidential setup, deposit, apply, transfer and withdrawal instructions.
+
+Confidential transfer fees, confidential mint/burn, registry provisioning, encryption-key import and key rotation are outside this workflow. Unsupported extensions remain inspectable and operations explain the restriction. There is no Legacy/v0 multi-transaction confidential send fallback. Demo/offline mode cannot perform confidential operations; mainnet transaction signing remains disabled.
+
+For a local validator, use Agave 4.3+ and a Token-2022 program built with `zk-ops`. Some bundled validator programs reject deposits with `InvalidInstructionData`; the version string alone does not establish confidential support. The verification used the published Token-2022 11.1.0 program loaded with `--bpf-program`. See [Solana's integration guide](https://solana.com/docs/tokens/extensions/confidential-transfer/integration-guide).
+
+With isolated loopback endpoints and disposable wallets:
+
+```sh
+SOLTE_TEST_RPC=http://127.0.0.1:19899 SOLTE_TEST_WS=ws://127.0.0.1:19900 \
+  cargo test --locked --test confidential_localnet -- --ignored
+
+python3 scripts/confidential_smoke.py --binary target/release/solte \
+  --rpc http://127.0.0.1:19899 --ws ws://127.0.0.1:19900 \
+  --solana-tools /path/to/solana-release/bin
 ```
 
 ## Navigation

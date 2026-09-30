@@ -5,10 +5,15 @@ use solte::{
     demo, ui,
 };
 fn main() -> anyhow::Result<()> {
+    let output = std::env::args()
+        .nth(1)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("solte-confidential-previews"));
+    std::fs::create_dir_all(&output)?;
     let mut app = App::new("/test".into(), Config::default(), vec![]);
     demo::populate(&mut app);
     app.tokens[2].account["data"]["parsed"]["info"]["extensions"] = json!([
-        {"extension":"confidentialTransferAccount","state":{"approved":true,"allowConfidentialCredits":true,"allowNonConfidentialCredits":true,"pendingBalanceCreditCounter":2,"maximumPendingBalanceCreditCounter":65536}}
+        {"extension":"confidentialTransferAccount","state":{"elgamalPubkey":"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=","approved":true,"allowConfidentialCredits":true,"allowNonConfidentialCredits":true,"pendingBalanceCreditCounter":2,"maximumPendingBalanceCreditCounter":65536}}
     ]);
     app.tokens[2].mint_info.as_mut().unwrap()["extensions"] = json!([
         {"extension":"confidentialTransferMint","state":{"authority":app.tokens[2].authority,"autoApproveNewAccounts":true,"auditorElgamalPubkey":null}}
@@ -19,7 +24,7 @@ fn main() -> anyhow::Result<()> {
         app.modal = None;
         ui::snapshot(
             &app,
-            &std::path::PathBuf::from(format!("/private/tmp/solte-ct-list-{width}.svg")),
+            &output.join(format!("solte-ct-list-{width}.svg")),
             width,
             height,
         )?;
@@ -29,7 +34,39 @@ fn main() -> anyhow::Result<()> {
         });
         ui::snapshot(
             &app,
-            &std::path::PathBuf::from(format!("/private/tmp/solte-ct-inspector-{width}.svg")),
+            &output.join(format!("solte-ct-inspector-{width}.svg")),
+            width,
+            height,
+        )?;
+        for selected in [0, 3, 5] {
+            app.modal = Some(Modal::Confidential {
+                account: Box::new(app.tokens[2].clone()),
+                selected,
+            });
+            ui::snapshot(
+                &app,
+                &output.join(format!("solte-ct-menu-{width}-{selected}.svg")),
+                width,
+                height,
+            )?;
+        }
+        for operation in [
+            solte::confidential_operations::Operation::Configure,
+            solte::confidential_operations::Operation::Transfer,
+            solte::confidential_operations::Operation::Apply,
+        ] {
+            app.open_form(solte::app::FormKind::Confidential(operation));
+            ui::snapshot(
+                &app,
+                &output.join(format!("solte-ct-form-{width}-{operation:?}.svg")),
+                width,
+                height,
+            )?;
+        }
+        app.open_form(solte::app::FormKind::ConfidentialMint);
+        ui::snapshot(
+            &app,
+            &output.join(format!("solte-ct-mint-{width}.svg")),
             width,
             height,
         )?;
