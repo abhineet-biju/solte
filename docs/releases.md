@@ -1,10 +1,10 @@
 # Installations and releases
 
-Prebuilt downloads are **pending the first successful GitHub release**. The URLs below will not work until the corresponding release exists. For now, [build from source](#build-from-source).
+Development prereleases are available for macOS and Linux. Use the version-specific installer in the [README](../README.md#install), or [build from source](#build-from-source) for changes that have not been released yet. A stable release has not been published.
 
 ## Install a published binary
 
-After the first stable release, install without Rust or a repository checkout:
+For the current development prerelease, use the exact version-specific command in the README. After the first stable release, the following command will install without Rust or a repository checkout:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/abhineet-biju/solte/releases/latest/download/solte-installer.sh | sh

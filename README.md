@@ -29,6 +29,8 @@ Prebuilt binaries are available for macOS and Linux (prerelease).
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/abhineet-biju/solte/releases/download/v0.1.1-dev.3.1.gb206996f0152/solte-installer.sh | sh
 ```
 
+This prerelease predates confidential transfers and local mint/account names. To use those features before a newer prerelease is published, [build from source](docs/releases.md#build-from-source).
+
 Run `solte` in your project.
 
 Try `solte --demo --theme neon` without using real keys.
