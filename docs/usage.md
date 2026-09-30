@@ -80,7 +80,9 @@ Token snapshots are held in memory, scoped to the selected wallet and network. S
 To run the token workflow through a real pseudo-terminal:
 
 ```sh
-python3 scripts/token_smoke.py --binary target/debug/solte
+python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r scripts/requirements-test.txt
+.venv/bin/python scripts/token_smoke.py --binary target/debug/solte
 ```
 
 To test both token programs on an isolated local validator, use loopback endpoints and disposable test wallets:

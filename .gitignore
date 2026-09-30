@@ -1,5 +1,6 @@
 /target/
 /.solte/
+/.venv/
 *.keypair.json
 .DS_Store
 __pycache__/

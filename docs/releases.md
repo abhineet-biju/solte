@@ -133,6 +133,9 @@ Cargo normally installs into `~/.cargo/bin`; follow rustup's PATH setup instruct
 Python 3.11+ is needed for release scripts; CI uses 3.13. Run application and release checks:
 
 ```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r scripts/requirements-test.txt
+. .venv/bin/activate
 cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings

@@ -1,145 +1,89 @@
 #!/usr/bin/env python3
 """Exercise token inspection, export, forms, mouse input, and resizing in a PTY."""
 import argparse
-import base64
-import fcntl
 import json
-import os
 from pathlib import Path
-import pty
-import re
-import select
-import signal
-import struct
-import subprocess
 import tempfile
-import termios
-import time
+
+from terminal_session import TerminalSession
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path("target/debug/solte"))
+    parser.add_argument("--artifact-dir", type=Path, help="Save terminal state on failure")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="solte-token-terminal-") as temporary:
         root = Path(temporary)
-        master, slave = pty.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
-        process = subprocess.Popen([str(args.binary.resolve()), "--demo", "--view", "tokens", "--project", str(root), "--reduced-motion"],
-                                   stdin=slave, stdout=slave, stderr=slave, env=dict(os.environ, TERM="xterm-256color"))
-        os.close(slave)
-        output = bytearray()
-
-        def drain(seconds=0.3):
-            deadline = time.monotonic() + seconds
-            while time.monotonic() < deadline:
-                if select.select([master], [], [], 0.05)[0]:
-                    try:
-                        output.extend(os.read(master, 65536))
-                    except OSError:
-                        break
-
-        def send(data):
-            output.clear()
-            os.write(master, data)
-            drain()
-
-        def clipboard():
-            matches = re.findall(rb"\x1b\]52;[^;]*;([A-Za-z0-9+/=]+)", output)
-            assert matches, "Copy should emit an OSC 52 request"
-            return base64.b64decode(matches[-1]).decode()
-
-        def resize(width, height):
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
-            os.kill(process.pid, signal.SIGWINCH)
-            drain()
-
-        try:
-            deadline = time.monotonic() + 10
-            while b"Token accounts" not in output and time.monotonic() < deadline:
-                drain()
-            assert b"Token accounts" in output, "Tokens view should finish its initial render"
-            send(b"j\r")
-            assert b"Token account inspector" in output
-            send(b"y")
-            account = clipboard()
-            send(b"M")
-            mint = clipboard()
+        command = [str(args.binary.resolve()), "--demo", "--view", "tokens", "--project", str(root), "--reduced-motion"]
+        with TerminalSession(command, 120, 32, artifact_dir=args.artifact_dir) as terminal:
+            terminal.wait_text("Token accounts")
+            terminal.send(b"j\r", "Token account inspector")
+            terminal.send(b"y")
+            account = terminal.clipboard()
+            terminal.send(b"M")
+            mint = terminal.clipboard()
             assert account != mint
-            send(b"\x1b/")
-            send(b"Token-2022\r")
-            send(b"j\r")
-            assert b"Token account inspector" in output
-            send(b"E")
-            assert b"Export token account" in output
-            send(b"\x15token.json\r")
+            terminal.escape("Token account inspector")
+            terminal.send(b"/", "Filter token accounts")
+            terminal.send(b"Token-2022\r", "Filter: Token-2022")
+            terminal.send(b"\r", "Token account inspector")
+            terminal.send(b"E", "Export token account")
+            terminal.send(b"\x15token.json\r")
             exported = root / "token.json"
-            deadline = time.monotonic() + 5
-            while not exported.exists() and time.monotonic() < deadline:
-                drain()
+            terminal.wait_for(exported.exists, "token JSON export")
             data = json.loads(exported.read_text())
             assert data["program"] == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
             assert "mint_info" in data and "account" in data
-            send(b"s")
-            assert b"Send tokens" in output
+            terminal.send(b"s", "Send tokens")
             for width, height in [(60, 10), (80, 20), (120, 32)]:
-                resize(width, height)
-                send(b"\t")
-                assert process.poll() is None
-            send(b"\x1b")
-            send(b"a")
-            assert b"Create associated token account" in output
-            send(b"\x1b")
-            send(b"x")
-            send(b"\x1b[<0;4;10M")
-            assert b"Token account inspector" in output, "Mouse row selection should open the same inspector"
-            send(b"\x1b")
-            send(b"c")
-            assert b"Associated token account" in output, "Create chooser should expose both operations"
-            send(b"\r")
-            assert b"Create token mint" in output
-            resize(88, 22)
-            assert b"more below" in output, "The mint form should advertise hidden fields"
-            send(b"\x1b[<65;40;12M")
-            assert process.poll() is None, "Mouse wheel should reveal later fields"
+                terminal.resize(width, height)
+                terminal.send(b"\t")
+                terminal.wait_text("Send tokens")
+            terminal.escape("Send tokens")
+            terminal.send(b"a", "Create associated token account")
+            terminal.escape("Create associated token account")
+            terminal.send(b"x")
+            terminal.wait_for(lambda: "Filter:" not in terminal.text, "cleared token filter")
+            terminal.click_text(mint[:6], "Token account inspector", max_column=55)
+            terminal.send(b"M")
+            assert terminal.clipboard() == mint, "Mouse should inspect the intended token row"
+            terminal.escape("Token account inspector")
+            terminal.send(b"c", "Associated token account")
+            terminal.send(b"\r", "Create token mint")
+            terminal.resize(88, 22)
+            terminal.wait_text("more below")
+            terminal.send(b"\x1b[<65;40;12M")
+            terminal.wait_text("more above")
             for width, height in [(60, 10), (80, 20), (120, 32)]:
-                resize(width, height)
+                terminal.resize(width, height)
                 for _ in range(6):
-                    send(b"\t")
-                assert process.poll() is None
-            resize(120, 32)
-            send(b"\x1b")
-            send(b"c")
-            send(b"j\r")
-            assert b"Create associated token account" in output
-            send(b"\x1b")
-            send(b"v")
-            assert b"Project mints" in output
-            send(b"j\r")
-            assert b"Mint more [m]" in output, "Selected project mint should expose issuance"
-            send(b"y")
-            project_mint = clipboard()
+                    terminal.send(b"\t")
+                terminal.wait_text("Create token mint")
+            terminal.escape("Create token mint")
+            terminal.send(b"c", "Associated token account")
+            terminal.send(b"j\r", "Create associated token account")
+            terminal.escape("Create associated token account")
+            terminal.send(b"v", "Project mints")
+            terminal.send(b"j\r", "Mint inspector")
+            terminal.wait_text("Mint more [m]")
+            terminal.send(b"y")
+            project_mint = terminal.clipboard()
             assert len(project_mint) >= 32
-            send(b"t")
-            send(b"y")
-            assert clipboard() != project_mint, "View account should inspect the active wallet's token account"
-            send(b"m")
-            assert b"Requires a loaded mint authority" in output
-            send(b"\x1b")
-            send(b"c")
-            send(b"\x1b[<0;28;14M")
-            assert b"Create token mint" in output, "Mouse create should open the same mint form"
-            send(b"\x1b")
-            send(b"q")
-            process.wait(timeout=5)
-            assert process.returncode == 0
+            terminal.send(b"t", "Token account inspector")
+            terminal.send(b"y")
+            assert terminal.clipboard() != project_mint, "View account should inspect the active wallet's token account"
+            terminal.send(b"m", "Mint tokens")
+            terminal.wait_text("Requires a loaded mint authority")
+            terminal.escape("Mint tokens")
+            terminal.send(b"c", "Associated token account")
+            terminal.click_text("Token mint", "Create token mint")
+            terminal.escape("Create token mint")
+            terminal.send(b"q")
+            terminal.process.wait(timeout=5)
+            assert terminal.process.returncode == 0
             assert not (root / ".solte").exists(), "Demo token workflow must not create project wallet data"
             print("PASS: token selection, copying, filtering, JSON export, mint creation, project mints, minting, mouse, resizing, and exit")
-        finally:
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=5)
-            os.close(master)
 
 
 if __name__ == "__main__":
